@@ -152,7 +152,7 @@ class LitPedGraph(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        optm = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=1e-3)
+        optm = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=1e-3)
         lr_scheduler = {'name':'OneCycleLR', 'scheduler': 
         torch.optim.lr_scheduler.OneCycleLR(optm, max_lr=self.lr, div_factor=10.0, total_steps=self.total_steps, verbose=False),
         'interval': 'step', 'frequency': 1,}
