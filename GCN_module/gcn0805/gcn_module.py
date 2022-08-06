@@ -3,6 +3,7 @@ import math
 import torch
 from torch import nn
 import numpy as np
+from zmq import device
 
     
 
@@ -253,6 +254,9 @@ class decoupling_gcn(nn.Module):
         self.subnet = A.shape[0]
         self.groups = 8
         self.adaptive = adaptive
+
+        self.linear = nn.Linear(self.in_ch, self.out_ch)
+
         self.DecoupleA = nn.Parameter(torch.tensor(np.reshape(A.astype(np.float32), [
                                       3, 1, 19, 19]), dtype=torch.float32, requires_grad=True).repeat(1, self.groups, 1, 1), requires_grad=True)
 
@@ -298,7 +302,7 @@ class decoupling_gcn(nn.Module):
 
     def forward(self, x):
         #inputs -> [2, 4, 62, 19]
-        x = self.linear(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)#[2, 32, 62, 19]
+        #x = self.linear(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)#[2, 32, 62, 19]
 
         N, C, T, V = x.size()
         #y = None
@@ -313,12 +317,12 @@ class decoupling_gcn(nn.Module):
             z = torch.matmul(A2, A1).view(N, C, T, V)#[2, 32, T, 19]
             y = z + y if y is not None else z'''
 
-        learn_A = self.DecoupleA.repeat(1, self.out_ch // self.groups, 1, 1)
+        learn_A = self.DecoupleA.repeat(1, self.out_ch // self.groups, 1, 1)# learn_A -> [3, 32, 19, 19]
         norm_learn_A = torch.cat([self.L2_norm(learn_A[0:1, ...]),
                             self.L2_norm(learn_A[1:2, ...]),
                             self.L2_norm(learn_A[2:3, ...])],
                             0)
-
+        #norm_A -> [3, 32, 19, 19]
         y = torch.einsum('nctw,cd->ndtw', (x, self.Linear_weight)).contiguous()
         y = y + self.Linear_bias
         y = self.bn0(y)
@@ -365,16 +369,15 @@ class TCN_GCN_unit(nn.Module):
         y = self.relu(tcn)
         return y
 
-'''
-import random
 
-model = pedMondel(frames=True, vel=True, seg=True, h3d=True)
+'''
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = pedMondel(frames=True, vel=True, seg=True, h3d=True).to(device)
 
 while True:
-    T = random.randint(2, 62)
-    tens_kp = torch.randn(size=(2, 4, T, 19))
-    tens_fr = torch.randn(size=(2, 4, 192, 64))
-    tens_vel = torch.randn(size=(2, 2, T))
+    T = 62
+    tens_kp = torch.randn(size=(2, 4, T, 19)).to(device)
+    tens_fr = torch.randn(size=(2, 4, 192, 64)).to(device)
+    tens_vel = torch.randn(size=(2, 2, T)).to(device)
     y = model(tens_kp, tens_fr, tens_vel)
-    
 '''
