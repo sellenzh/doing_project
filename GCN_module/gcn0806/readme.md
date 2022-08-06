@@ -4,4 +4,4 @@ the best performance setting is:
   
   batch_size : 2
   
-  picture is :  [81.24-82.24.png](./81.24-82.24.png) 
+  picture is :  ![81.24-82.24](./81.24-82.24.png) 
