@@ -181,7 +181,7 @@ class unit_tcn(nn.Module):
         x = self.bn(self.conv(x))
         return x
 
-
+'''
 class unit_gcn(nn.Module):
     def __init__(self, in_channels, out_channels, A, adaptive=True):
         super(unit_gcn, self).__init__()
@@ -244,17 +244,17 @@ class unit_gcn(nn.Module):
         y += self.down(x)
         y = self.relu(y)
 
-        return y
+        return y'''
 class decoupling_gcn(nn.Module):
     def __init__(self, in_channels, out_channels, A, adaptive) -> None:
         super(decoupling_gcn, self).__init__()
         self.in_ch = in_channels
         self.out_ch = out_channels
         self.subnet = A.shape[0]
+        self.groups = 8
         self.adaptive = adaptive
-        groups = self.out_ch / self.subnet
         self.DecoupleA = nn.Parameter(torch.tensor(np.reshape(A.astype(np.float32), [
-                                      3, 1, 19, 19]), dtype=torch.float32, requires_grad=True).repeat(1, groups, 1, 1), requires_grad=True)
+                                      3, 1, 19, 19]), dtype=torch.float32, requires_grad=True).repeat(1, self.groups, 1, 1), requires_grad=True)
 
         if adaptive:
             self.PA = nn.Parameter(torch.from_numpy(A.astype(np.float32)), requires_grad=True)
@@ -313,7 +313,7 @@ class decoupling_gcn(nn.Module):
             z = torch.matmul(A2, A1).view(N, C, T, V)#[2, 32, T, 19]
             y = z + y if y is not None else z'''
 
-        learn_A = self.DecoupleA.repeat(1, self.out_channels // self.groups, 1, 1)
+        learn_A = self.DecoupleA.repeat(1, self.out_ch // self.groups, 1, 1)
         norm_learn_A = torch.cat([self.L2_norm(learn_A[0:1, ...]),
                             self.L2_norm(learn_A[1:2, ...]),
                             self.L2_norm(learn_A[2:3, ...])],
@@ -324,7 +324,7 @@ class decoupling_gcn(nn.Module):
         y = self.bn0(y)
 
         n, kc, t, v = y.size()
-        y = y.view(n, self.num_subset, kc // self.num_subset, t, v)
+        y = y.view(n, self.subnet, kc // self.subnet, t, v)
         y = torch.einsum('nkctv,kcvw->nctw', (y, norm_learn_A))
 
         y = self.bn(y)
@@ -365,7 +365,7 @@ class TCN_GCN_unit(nn.Module):
         y = self.relu(tcn)
         return y
 
-
+'''
 import random
 
 model = pedMondel(frames=True, vel=True, seg=True, h3d=True)
@@ -376,3 +376,5 @@ while True:
     tens_fr = torch.randn(size=(2, 4, 192, 64))
     tens_vel = torch.randn(size=(2, 2, T))
     y = model(tens_kp, tens_fr, tens_vel)
+    
+'''
