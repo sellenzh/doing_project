@@ -2,4 +2,4 @@
 
 the best performance model.
 
-![pic.png](./result/85.06-88.02.png)
+![pic.png](./results/85.06-88.02.png)
