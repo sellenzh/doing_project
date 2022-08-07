@@ -356,7 +356,7 @@ class TCN_GCN_unit(nn.Module):
         self.num_heads = 8
         self.hidden_dims = 256
         self.attention_dropout = 0.2
-        self.num_times = 6
+        self.num_times = 5
 
         #self.gcn1 = unit_gcn(in_channels, out_channels, A, adaptive=adaptive)
         self.gcn1 = decoupling_gcn(in_channels, out_channels, A, adaptive)
