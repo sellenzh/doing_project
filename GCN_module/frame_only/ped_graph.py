@@ -45,8 +45,9 @@ class pedMondel(nn.Module):
         f = self.img_layer2(self.img_layer1(frames))
         f1 = self.conv(self.pool_sig_2d_1(f))
         y = self.pool_sig_2d_2(self.img_layer3(f)).mul(f1).squeeze()
-        y += self.att(y).mul(y)
-        y = self.linear(self.drop(y))
+        y = self.att(y).mul(y) + y
+        y = self.drop(y)
+        y = self.linear(y)
         return y
 '''
 tensor = torch.randn(size=(16, 4, 164, 92))
