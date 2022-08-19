@@ -4,10 +4,8 @@ import torch
 from torch import nn
 import numpy as np
 from math import sqrt
-from torch.autograd import Variable
 
-from model_0730.encoder_module import Encoder, GraphEncoder
-
+from model_0730.encoder_module import Encoder
     
 
 class pedMondel(nn.Module):
@@ -60,20 +58,6 @@ class pedMondel(nn.Module):
             self.v2 = nn.Sequential(
                 nn.Conv1d(self.ch1, self.ch2, kernel_size=2, bias=False), 
                 nn.BatchNorm1d(self.ch2), nn.SiLU())
-        # ----------------------------------------------------------------------------------------------------
-        # self.l3 = TCN_GCN_unit(self.ch2, self.ch2, A)
-
-        # if frames:
-        #     self.conv3 = nn.Sequential(
-        #         nn.Conv2d(self.ch2, self.ch2, kernel_size=2, stride=1, padding=0, bias=False), 
-        #         nn.BatchNorm2d(self.ch2), nn.SiLU())
-            
-        # if vel:
-        #     self.v3 = nn.Sequential(
-        #         nn.Conv1d(self.ch2, self.ch2, kernel_size=2, bias=False), 
-        #         nn.BatchNorm1d(self.ch2), nn.SiLU())
-        # ----------------------------------------------------------------------------------------------------
-        
 
         self.gap = nn.AdaptiveAvgPool2d(1)
         
@@ -110,7 +94,6 @@ class pedMondel(nn.Module):
         if self.vel:
             v1 = self.v0(vel)#[2, 32, T-2]
 
-        # --------------------------
         x1 = self.l1(kp)
         if self.frames:
             f1 = self.conv1(f1)   
@@ -118,9 +101,7 @@ class pedMondel(nn.Module):
         if self.vel:   
             v1 = self.v1(v1)
             x1 = x1.mul(self.pool_sigm_1d(v1).unsqueeze(-1))
-        # --------------------------
-        
-        # --------------------------
+
         x1 = self.l2(x1)
         if self.frames:
             f1 = self.conv2(f1) 
@@ -128,15 +109,6 @@ class pedMondel(nn.Module):
         if self.vel:  
             v1 = self.v2(v1)
             x1 = x1.mul(self.pool_sigm_1d(v1).unsqueeze(-1))
-        # --------------------------
-        # x1 = self.l3(x1)
-        # if self.frames:
-        #     f1 = self.conv3(f1) 
-        #     x1 = x1.mul(self.pool_sigm_2d(f1))
-        # if self.vel:  
-        #     v1 = self.v3(v1)
-        #     x1 = x1.mul(self.pool_sigm_1d(v1).unsqueeze(-1))
-        # --------------------------
 
         x1 = self.gap(x1).squeeze(-1)
         x1 = x1.squeeze(-1)
@@ -185,70 +157,6 @@ class unit_tcn(nn.Module):
         x = self.bn(self.conv(x))
         return x
 
-'''
-class unit_gcn(nn.Module):
-    def __init__(self, in_channels, out_channels, A, adaptive=True):
-        super(unit_gcn, self).__init__()
-        self.out_c = out_channels
-        self.in_c = in_channels
-        self.num_subset = A.shape[0]
-        self.adaptive = adaptive
-        if adaptive:
-            self.PA = nn.Parameter(torch.from_numpy(A.astype(np.float32)), requires_grad=True)
-        else:
-            self.A = torch.autograd.Variable(torch.from_numpy(A.astype(np.float32)), requires_grad=False)
-
-        self.conv_d = nn.ModuleList()
-        for i in range(self.num_subset):
-            self.conv_d.append(nn.Conv2d(in_channels, out_channels, 1))
-
-        if in_channels != out_channels:
-            self.down = nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, 1),
-                nn.BatchNorm2d(out_channels)
-            )
-        else:
-            self.down = lambda x: x
-
-        self.bn = nn.BatchNorm2d(out_channels)
-        self.relu = nn.ReLU(inplace=True)
-
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                conv_init(m)
-            elif isinstance(m, nn.BatchNorm2d):
-                bn_init(m, 1)
-        bn_init(self.bn, 1e-6)
-        for i in range(self.num_subset):
-            conv_branch_init(self.conv_d[i], self.num_subset)
-    
-    def L2_norm(self, A):
-        # A:N,V,V
-        A_norm = torch.norm(A, 2, dim=1, keepdim=True) + 1e-4  # N,1,V
-        A = A / A_norm
-        return A
-
-    def forward(self, x):
-        N, C, T, V = x.size() # x -> 2, 4, T, 19
-
-        y = None
-        if self.adaptive:
-            A = self.PA
-            A = self.L2_norm(A)
-        else:
-            A = self.A.cuda(x.get_device())
-        for i in range(self.num_subset):
-
-            A1 = A[i]#[19, 19]
-            A2 = x.view(N, C * T, V)#[2, 4*T, 19]
-            z = self.conv_d[i](torch.matmul(A2, A1).view(N, C, T, V))#[2, 32, T, 19]
-            y = z + y if y is not None else z
-
-        y = self.bn(y)
-        y += self.down(x)
-        y = self.relu(y)
-
-        return y'''
 class decoupling_gcn(nn.Module):
     def __init__(self, in_channels, out_channels, A, adaptive) -> None:
         super(decoupling_gcn, self).__init__()
@@ -304,22 +212,6 @@ class decoupling_gcn(nn.Module):
         return A
 
     def forward(self, x):
-        #inputs -> [2, 4, 62, 19]
-        #x = self.linear(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)#[2, 32, 62, 19]
-
-        N, C, T, V = x.size()
-        #y = None
-        if self.adaptive:
-            A = self.PA
-            A = self.L2_norm(A)
-        else:
-            A = self.A.cuda(x.get_device())
-        '''for i in range(self.subnet):
-            A1 = A[i]#[19, 19]
-            A2 = x.view(N, C * T, V)#[2, 32*T, 19]
-            z = torch.matmul(A2, A1).view(N, C, T, V)#[2, 32, T, 19]
-            y = z + y if y is not None else z'''
-
         learn_A = self.DecoupleA.repeat(1, self.out_ch // self.groups, 1, 1)# learn_A -> [3, 32, 19, 19]
         norm_learn_A = torch.cat([self.L2_norm(learn_A[0:1, ...]),
                             self.L2_norm(learn_A[1:2, ...]),
@@ -337,17 +229,7 @@ class decoupling_gcn(nn.Module):
         y = self.bn(y)
         y += self.down(x)
         y = self.relu(y)
-        '''
-        y = self.bn(y.permute(0, 3, 1, 2))
-        y += self.down(x)
-        y = self.relu(y)'''
         return y
-'''
-
-
-
-'''
-
 
 class TCN_GCN_unit(nn.Module):
     def __init__(self, in_channels, out_channels, A, stride=1, residual=True, adaptive=True):
@@ -378,10 +260,6 @@ class TCN_GCN_unit(nn.Module):
     def forward(self, x):#x->[2, 4, T, 19]
         gcn = self.gcn1(x)
         res = self.residual(x)
-        '''B, C, T, V = x.size()
-        pool_t = torch.zeros(B, C, 62-T, V)
-        gcn_res = torch.cat((gcn+res, pool_t), dim=-2) #[B, C, 62, V]
-        '''
         gcn_res = gcn + res
         B, C, T, V = gcn_res.size()
         tcn = self.embed(gcn_res.permute(0, 3, 2, 1)).contiguous().view(B*V, T, -1)
@@ -390,75 +268,8 @@ class TCN_GCN_unit(nn.Module):
             tcn = self.tcn1[i](tcn)
             tcn += memory
         y = self.linear(tcn).contiguous().view(B, -1, T, V)
-        #tcn = tcn[:, :, :T, :]
         y = self.relu(y)
         return y
-
-
-
-
-'''
-class Pose_Module(nn.Module):
-    def __init__(self, config, first):
-        super(Pose_Module, self).__init__()
-        self.in_ch = 4 if first else 32
-        self.out_ch = 32 if first else 64
-        self.feature_dims = 64 if first else 128 #config.attention_dims
-        self.num_heads = 8#config.num_heads # 256
-        self.hidden_dims = 256#config.ffn_dims
-        self.attention_dropout = 0.2#config.attention_dropout if 1. > config.attention_dropout > 0. else None
-        self.num_times = 2#config.num_times
-        self.gat_version = 'v2'#config.gat_version
-
-        self.posi_en = Posi_Enconding(self.feature_dims, 0.0)
-        self.poselinear = nn.Linear(self.in_ch, self.feature_dims, bias=False)
-        self.embedding_layer = nn.ModuleList(
-            nn.Sequential(nn.Linear(self.in_ch, self.hidden_dims, bias=False), nn.PReLU()) for _ in range(self.num_times))
-        self.embed = nn.ModuleList(
-            Embedding_module(self.hidden_dims, self.num_heads) for _ in range(self.num_times))
-        self.gat_en = nn.ModuleList(
-            GraphEncoder(self.feature_dims, self.num_heads, self.hidden_dims, self.gat_version, self.attention_dropout) for _ in range(self.num_times))
-        self.gat_de = nn.ModuleList(
-            nn.Sequential(nn.Linear(self.feature_dims, self.feature_dims)) for _ in range(self.num_times))
-        
-        self.tat_en = nn.ModuleList(
-            Encoder(self.feature_dims, self.num_heads, self.hidden_dims, self.attention_dropout) for _ in range(self.num_times))
-        #self.temporal_token = nn.Parameter(torch.empty(1, 1, self.feature_dims))
-        self.output = nn.Linear(self.feature_dims, self.out_ch, bias=False)
-        self.activation = nn.LeakyReLU()
-
-        for module in self.modules():
-            if isinstance(module, nn.LayerNorm):
-                nn.init.ones_(module.weight)
-                nn.init.zeros_(module.bias)
-            #elif isinstance(module, nn.Embedding):
-            #    nn.init(module.weight)
-        #nn.init.normal_(self.temporal_token, 0.0, 0.02)
-        #nn.init.normal_(self.embedding_layer, 0.0, 0.02)
-    
-    def forward(self, pose):
-        """input: pose -> [2, 4/32, 62, 19]
-        output: y -> [2, 32/64, 62, 19]"""
-        B, C, T, V = pose.size()
-        pose = pose.permute(0, 2, 3, 1).contiguous().view(B, T, V, -1) #[2, 4, 62, 19] -> [2, 62, 19, 4]
-        x = self.poselinear(pose) #[2, 62, 19, 4] -> [2, 62, 19, 64/128]
-        y = x.contiguous().view(B*T, V, -1)
-        bias_pre = pose.unsqueeze(2) - pose.unsqueeze(3) # [2, 62, 19, 19, 4]
-        for i in range(self.num_times):
-            bias = self.embed[i](
-                self.embedding_layer[i](bias_pre)).contiguous().view(
-                    -1, V, V, self.num_heads)#[2, 62, 19, 4] -> [2, 62, 19, 8] -> [124, 19, 19, 8]
-            gat_out = self.gat_en[i](y, bias)
-            gat_out = self.gat_de[i](gat_out)#[124, 19, 64]
-            y = gat_out.contiguous().view(B*V, T, -1)#[38, 62, 64/128]
-            y = self.posi_en(y) # -> [38, 62, 64/128]
-        #for i in range(self.num_times):
-            memory = y
-            y = self.tat_en[i](y)
-            y = (y + memory).contiguous().view(B*T, V, -1)#[B*V, T, C] = [38, 62, 64] -> [B*T, V, C]
-        y = self.activation(self.output(y))
-        return y.contiguous().view(B, -1, T, V)#[2, 32/64, 62, 19]
-'''
 
 class Embedding_module(nn.Module):
     def __init__(self, in_channels, out_channels, bias=False):
@@ -468,49 +279,3 @@ class Embedding_module(nn.Module):
     
     def forward(self, x):
         return self.linear(x) / sqrt(self.out_ch)
-'''
-class Posi_Enconding(nn.Module):
-    def __init__(self, dim, dropout, len=62) -> None:
-        super(Posi_Enconding, self).__init__()
-        self.dropout = nn.Dropout(dropout) if not (dropout is None) else nn.Identity()
-
-        pe = torch.zeros(len, dim)
-        position = torch.arange(0, len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, dim, 2) *
-                            -(math.log(10000.0) / dim))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0)
-        self.register_buffer('pe', pe)
-
-    def forward(self, x):
-        shape = x.size()
-        x = x.view(-1, x.size(-2), x.size(-1))
-        x = x + Variable(self.pe[:, :x.size(1)], requires_grad=False)
-        x = self.dropout(x)
-        x = x.view(*shape)
-        return x
-'''
-'''
-config = None
-model1 = Pose_Module(config, True)
-model2 = Pose_Module(config, False)
-#model_embed = Embedding_module(256, 64)
-t = torch.randn(size=(2, 4, 62, 19))
-#layers = nn.Sequential(nn.Linear(4, 256), nn.PReLU())
-#y = layers(t)
-#y = model_embed(y)
-y = model1(t)
-y = model2(y)
-print(y.shape)'''
-'''
-import random
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = pedMondel(frames=True, vel=True, seg=True, h3d=True).to(device)
-
-while True:
-    T = random.randint(2, 62)
-    tens_kp = torch.randn(size=(2, 4, T, 19)).to(device)
-    tens_fr = torch.randn(size=(2, 4, 192, 64)).to(device)
-    tens_vel = torch.randn(size=(2, 2, T)).to(device)
-    y = model(tens_kp, tens_fr, tens_vel)'''
