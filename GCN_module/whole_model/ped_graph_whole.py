@@ -9,7 +9,8 @@ import numpy as np
 import torch
 from torch import nn
 
-from encoder_module import Encoder
+import torch.nn.functional as F
+from entmax import sparsemax, entmax15, entmax_bisect
 
 class pedMondel(nn.Module):
     '''
@@ -199,8 +200,7 @@ class GCN_TAT_unit(nn.Module):
         self.hidden_dims = 256
         self.attention_dropout = 0.3
         self.tat_times = 5
-        self.gcn_times = 5
-        self.groups = groups
+        self.gcn_times = 1
         self.res = residual
 
         self.gcn = nn.ModuleList()
@@ -220,24 +220,127 @@ class GCN_TAT_unit(nn.Module):
 
     def forward(self, x):
         for i in range(self.gcn_times):
-            gcn = self.gcn[i](x)
             if i == 0:
                 res = self.residual(x)
             elif self.res:
                 res = x
             else:
                 res = 0
+            gcn = self.gcn[i](x)
             x = gcn + res
+
+        b, c, t, v = x.size()
+        x = self.embed(x.permute(0, 3, 2, 1)).contiguous().view(b*v, t, -1)
         for i in range(self.tat_times):
-            b, c, t, v = x.size()
-            tcn = self.embed(x.permute(0, 3, 2, 1)).contiguous().view(b*v, t, -1)\
-                if i == 0 else x.permute(0, 3, 2, 1).contiguous().view(b*v, t, -1)
-            tcn += self.tcn[i](tcn)
-            x = tcn.contiguous().view(b, v, t, -1).permute(0, 3, 2, 1)\
-                if i != self.tat_times-1 else tcn.contiguous().view(b, v, t, -1)
-        y = self.linear(x).permute(0, 3, 2, 1)
+            x += self.tcn[i](x)
+
+        y = self.linear(x).contiguous().view(b, -1, t, v)
         return self.relu(y)
 
+class Encoder(nn.Module):
+    def __init__(self, inputs, heads, hidden, a_dropout=None, f_dropout=None):
+        '''Implemented encoder via multiple stacked encoder layers'''
+        super(Encoder, self).__init__()
+
+        self.norm = nn.LayerNorm(inputs)
+        self.layers = EncoderLayer(inputs, heads, hidden, a_dropout=a_dropout, f_dropout=f_dropout)
+
+    def forward(self, x, mask=None):
+        x = self.layers(x, mask)
+        return self.norm(x)#x
+
+class EncoderLayer(nn.Module):
+    def __init__(self, inputs, heads, hidden, a_dropout=None, f_dropout=None):
+        '''Implemented encoder layer via multi-head self-attention and feedforward net'''
+        super(EncoderLayer, self).__init__()
+
+        self.attention = MultiHeadAttention(heads, inputs, a_dropout=a_dropout, f_dropout=f_dropout)
+        self.attention_norm = nn.LayerNorm(inputs)
+        self.feedforward = FeedForwardNet(inputs, hidden, dropout=f_dropout)
+        self.feedforward_norm = nn.LayerNorm(inputs)
+
+    def forward(self, x, mask=None):
+        y = self.attention_norm(x)
+        y = self.attention(y, y, y, mask=mask)
+        x = x + y
+        y = self.feedforward_norm(x)
+        y = self.feedforward(y)
+        x = x + y
+        return x
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, heads, inputs, a_dropout=None, f_dropout=None):
+        '''Implemented simple multi-head attention'''
+        super(MultiHeadAttention, self).__init__()
+        self.heads = heads
+        self.inputs = inputs
+        assert inputs % heads == 0
+        self.hidden = inputs // heads
+
+        self.attention = ScaledDotProductAttention(a_dropout)
+        self.linear_q = nn.Linear(inputs, inputs)
+        self.linear_k = nn.Linear(inputs, inputs)
+        self.linear_v = nn.Linear(inputs, inputs)
+        self.output = nn.Linear(inputs, inputs)
+        self.dropout = nn.Dropout(p=f_dropout) if f_dropout is not None else nn.Identity()
+
+    def forward(self, q, k, v, mask):
+        bs = q.size(0)
+        q = self.linear_q(q).view(bs, -1, self.heads, self.hidden).transpose(1, 2)
+        k = self.linear_k(k).view(bs, -1, self.heads, self.hidden).transpose(1, 2)
+        v = self.linear_v(v).view(bs, -1, self.heads, self.hidden).transpose(1, 2)
+
+        out = self.attention(q, k, v, mask).transpose(1, 2).contiguous()
+        out = out.view(bs, -1, self.inputs)
+        return self.dropout(self.output(out))
+
+class ScaledDotProductAttention(nn.Module):
+
+    def __init__(self, dropout=None):
+        '''Implemented simple attention'''
+        super(ScaledDotProductAttention, self).__init__()
+        self.dropout = nn.Dropout(p=dropout) if dropout is not None else nn.Identity()
+        self.attn_type = 'entmax15'
+
+    def forward(self, q, k, v, mask=None):
+        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(q.size(-1))
+
+        if mask is not None:
+            scores = scores.masked_fill(mask == 0, -1e12)
+        if self.attn_type == 'softmax':
+            attn = F.softmax(scores, dim=-1)
+        elif self.attn_type == 'sparsemax':
+            attn = sparsemax(scores, dim=-1)
+        elif self.attn_type == 'entmax15':
+            attn = entmax15(scores, dim=-1)
+        elif self.attn_type == 'entmax':
+            attn = entmax_bisect(scores, alpha=1.6, dim=-1, n_iter=25)
+        return torch.matmul(attn, v)
+
+
+class Mish(nn.Module):
+    def __init__(self):
+        super().__init__()
+        print("Mish avtivation loaded...")
+
+    def forward(self, x):
+        x = x * (torch.tanh(F.softplus(x)))
+        return x
+
+class FeedForwardNet(nn.Module):
+    def __init__(self, inputs, hidden, dropout):
+        '''Implemented feedforward network'''
+        super(FeedForwardNet, self).__init__()
+        self.upscale = nn.Linear(inputs, hidden)
+        self.activation = Mish()
+        self.downscale = nn.Linear(hidden, inputs)
+        self.dropout = nn.Dropout(p=dropout) if dropout is not None else nn.Identity()
+
+    def forward(self, x):
+        x = self.upscale(x)
+        x = self.activation(x)
+        x = self.downscale(x)
+        return self.dropout(x)
 
 def conv_init(layer):
     if layer.weight is not None:
