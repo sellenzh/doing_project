@@ -12,11 +12,8 @@ class pedMondel(nn.Module):
 
     def __init__(self, frames, vel=False, seg=False, h3d=True, nodes=19, n_clss=1):
         super(pedMondel, self).__init__()
-
-        self.h3d = h3d # bool if true 3D human keypoints data is enable otherwise 2D is only used
         self.frames = frames
         self.vel = vel
-        self.seg = seg
         self.n_clss = n_clss
         self.ch = 4 if h3d else 3
         self.ch1, self.ch2 = 32, 64
