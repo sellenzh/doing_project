@@ -23,7 +23,7 @@ class pedMondel(nn.Module):
         bn_init(self.data_bn, 1)
         self.drop = nn.Dropout(0.25)
         A = np.stack([np.eye(nodes)] * 3, axis=0)
-        B = np.stack([np.eye(nodes)] * 3, axis=0)
+        #B = np.stack([np.eye(nodes)] * 3, axis=0)
         
         if frames:
             self.conv0 = nn.Sequential(
@@ -122,37 +122,26 @@ def conv_init(conv):
     if conv.bias is not None:
         nn.init.constant_(conv.bias, 0)
 
-
 def bn_init(bn, scale):
     nn.init.constant_(bn.weight, scale)
     nn.init.constant_(bn.bias, 0)
 
+class conv_residual(nn.Module):
+    '''the residual of gcn and temporal attention module
+        to adjust channels by using convolution
+    '''
+    def __init__(self, in_channels, out_channels,kernel_size=1, stride=1):
+        super(conv_residual, self).__init__()
 
-def conv_branch_init(conv, branches):
-    weight = conv.weight
-    n = weight.size(0)
-    k1 = weight.size(1)
-    k2 = weight.size(2)
-    nn.init.normal_(weight, 0, math.sqrt(2. / (n * k1 * k2 * branches)))
-    if conv.bias is not None:
-        nn.init.constant_(conv.bias, 0)
-
-
-class unit_tcn(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=5, stride=1):
-        super(unit_tcn, self).__init__()
-        pad = int((kernel_size - 1) / 2)
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=(kernel_size, 1), padding=(pad, 0),
-                              stride=(stride, 1))
-
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride)
         self.bn = nn.BatchNorm2d(out_channels)
         self.relu = nn.ReLU(inplace=True)
         conv_init(self.conv)
         bn_init(self.bn, 1)
 
     def forward(self, x):
-        x = self.bn(self.conv(x))
-        return x
+        y = self.conv(x)
+        return self.bn(y)
 
 class decoupling_gcn(nn.Module):
     def __init__(self, in_channels, out_channels, A, adaptive) -> None:
@@ -235,14 +224,15 @@ class TCN_GCN_unit(nn.Module):
         self.num_heads = 8
         self.hidden_dims = 256
         self.attention_dropout = 0.2
-        self.num_times = 5
+        self.tat_times = 5
+        self.gcn_times = 1
 
         #self.gcn1 = unit_gcn(in_channels, out_channels, A, adaptive=adaptive)
-        self.gcn1 = decoupling_gcn(in_channels, out_channels, A, adaptive)
+        self.gcn = decoupling_gcn(in_channels, out_channels, A, adaptive)
         self.embed = Embedding_module(out_channels, self.feature_dims)
         #self.tcn1 = unit_tcn(out_channels, out_channels, stride=stride)
-        self.tcn1 = nn.ModuleList(
-            Encoder(self.feature_dims, self.num_heads, self.hidden_dims, self.attention_dropout) for _ in range(self.num_times))
+        self.tat = nn.ModuleList(
+            Encoder(self.feature_dims, self.num_heads, self.hidden_dims, self.attention_dropout) for _ in range(self.tat_times))
         self.relu = nn.ReLU(inplace=True)
         if not residual:
             self.residual = lambda x: 0
@@ -251,18 +241,18 @@ class TCN_GCN_unit(nn.Module):
             self.residual = lambda x: x
 
         else:
-            self.residual = unit_tcn(in_channels, out_channels, kernel_size=1, stride=stride)
+            self.residual = conv_residual(in_channels, out_channels, kernel_size=1, stride=stride)
         self.linear = nn.Linear(self.feature_dims, out_channels)
 
     def forward(self, x):#x->[2, 4, T, 19]
-        gcn = self.gcn1(x)
+        gcn = self.gcn(x)
         res = self.residual(x)
         gcn_res = gcn + res
         B, C, T, V = gcn_res.size()
         tcn = self.embed(gcn_res.permute(0, 3, 2, 1)).contiguous().view(B*V, T, -1)
-        for i in range(self.num_times):
+        for i in range(self.tat_times):
             memory = tcn
-            tcn = self.tcn1[i](tcn)
+            tcn = self.tat[i](tcn)
             tcn += memory
         y = self.linear(tcn).contiguous().view(B, -1, T, V)
         y = self.relu(y)
