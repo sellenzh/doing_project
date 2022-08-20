@@ -22,7 +22,7 @@ class pedMondel(nn.Module):
         self.data_bn = nn.BatchNorm1d(self.ch * nodes)
         bn_init(self.data_bn, 1)
         self.drop = nn.Dropout(0.25)
-        A = np.stack([np.eye(nodes)] * 3, axis=0)
+        A = np.stack([np.stack([np.eye(nodes)] * 3, axis=0)] * 2, axis=0)
         #B = np.stack([np.eye(nodes)] * 3, axis=0)
         
         if frames:
@@ -161,8 +161,7 @@ class decoupling_gcn(nn.Module):
             self.PA = nn.Parameter(torch.from_numpy(A.astype(np.float32)), requires_grad=True)
         else:
             self.A = torch.autograd.Variable(torch.from_numpy(A.astype(np.float32)), requires_grad=False)
-
-        
+    
         if in_channels != out_channels:
             self.down = nn.Sequential(
                 nn.Conv2d(in_channels, out_channels, 1),
@@ -189,7 +188,7 @@ class decoupling_gcn(nn.Module):
 
         self.Linear_bias = nn.Parameter(torch.zeros(
             1, out_channels * self.subnet, 1, 1, requires_grad=True, device='cuda'), requires_grad=True)
-        nn.init.constant(self.Linear_bias, 1e-6)
+        nn.init.constant_(self.Linear_bias, 1e-6)
 
     def L2_norm(self, A):
         # A:N,V,V
@@ -225,12 +224,14 @@ class TCN_GCN_unit(nn.Module):
         self.hidden_dims = 256
         self.attention_dropout = 0.2
         self.tat_times = 5
-        self.gcn_times = 1
+        self.gcn_times = 2
 
-        #self.gcn1 = unit_gcn(in_channels, out_channels, A, adaptive=adaptive)
-        self.gcn = decoupling_gcn(in_channels, out_channels, A, adaptive)
+        self.gcn = nn.ModuleList()
+        self.gcn.append(decoupling_gcn(in_channels, out_channels, A[0], adaptive))
+        i = 0
+        while self.gcn_times - 1 > i:
+            self.gcn.append(decoupling_gcn(out_channels, out_channels, A[i+1], adaptive))
         self.embed = Embedding_module(out_channels, self.feature_dims)
-        #self.tcn1 = unit_tcn(out_channels, out_channels, stride=stride)
         self.tat = nn.ModuleList(
             Encoder(self.feature_dims, self.num_heads, self.hidden_dims, self.attention_dropout) for _ in range(self.tat_times))
         self.relu = nn.ReLU(inplace=True)
@@ -245,11 +246,12 @@ class TCN_GCN_unit(nn.Module):
         self.linear = nn.Linear(self.feature_dims, out_channels)
 
     def forward(self, x):#x->[2, 4, T, 19]
-        gcn = self.gcn(x)
-        res = self.residual(x)
-        gcn_res = gcn + res
-        B, C, T, V = gcn_res.size()
-        tcn = self.embed(gcn_res.permute(0, 3, 2, 1)).contiguous().view(B*V, T, -1)
+        for i in range(self.gcn_times):
+            gcn = self.gcn[i](x)
+            res = x if i != 0 and self.res else self.residual(x)
+            x = gcn + res
+        B, C, T, V = x.size()
+        tcn = self.embed(x.permute(0, 3, 2, 1)).contiguous().view(B*V, T, -1)
         for i in range(self.tat_times):
             memory = tcn
             tcn = self.tat[i](tcn)
