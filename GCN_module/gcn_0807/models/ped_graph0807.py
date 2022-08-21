@@ -23,7 +23,7 @@ class pedMondel(nn.Module):
         self.data_bn = nn.BatchNorm1d(self.ch * nodes)
         bn_init(self.data_bn, 1)
         self.drop = nn.Dropout(0.25)
-        A = np.stack([np.stack([np.eye(nodes)] * 3, axis=0)] * 2, axis=0)
+        A = np.stack([np.eye(nodes)] * 3, axis=0)
         # B = np.stack([np.eye(nodes)] * 3, axis=0)
 
         if frames:
@@ -328,7 +328,6 @@ class FeedForwardNet(nn.Module):
         x = self.downscale(x)
         return self.dropout(x)
 
-
 class TCN_GCN_unit(nn.Module):
     def __init__(self, in_channels, out_channels, A, stride=1, residual=True, adaptive=True):
         super(TCN_GCN_unit, self).__init__()
@@ -337,16 +336,10 @@ class TCN_GCN_unit(nn.Module):
         self.hidden_dims = 256
         self.attention_dropout = 0.2
         self.tat_times = 5
-        self.gcn_times = 1
 
         self.res = residual
+        self.gcn = decoupling_gcn(in_channels, out_channels, A, adaptive)
 
-        self.gcn = nn.ModuleList()
-        self.gcn.append(decoupling_gcn(in_channels, out_channels, A[0], adaptive))
-        i = 0
-        while self.gcn_times - 1 > i:
-            self.gcn.append(decoupling_gcn(out_channels, out_channels, A[i + 1], adaptive))
-            i += 1
         self.embed = Embedding_module(out_channels, self.feature_dims)
         self.tat = nn.ModuleList(
             Encoder(self.feature_dims, self.num_heads, self.hidden_dims, self.attention_dropout) for _ in
@@ -364,10 +357,9 @@ class TCN_GCN_unit(nn.Module):
 
     def forward(self, x):  # x->[2, 4, T, 19]
         #x = self.embed(x.permute(0, 3, 2, 1)).permute(0, 3, 2, 1)
-        for i in range(self.gcn_times):
-            gcn = self.gcn[i](x)
-            res = x if i != 0 and self.res else self.residual(x)
-            x = gcn + res
+        gcn = self.gcn(x)
+        res = self.residual(x)
+        x = gcn + res
         B, C, T, V = x.size()
         tcn = self.embed(x.permute(0, 3, 2, 1)).contiguous().view(B*V, T, -1)
         #tcn = x.permute(0, 3, 2, 1).contiguous().view(B*V, T, -1)
