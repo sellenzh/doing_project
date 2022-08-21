@@ -347,7 +347,7 @@ class TCN_GCN_unit(nn.Module):
         while self.gcn_times - 1 > i:
             self.gcn.append(decoupling_gcn(out_channels, out_channels, A[i + 1], adaptive))
             i += 1
-        self.embed = Embedding_module(outchannels, self.feature_dims)
+        self.embed = Embedding_module(out_channels, self.feature_dims)
         self.tat = nn.ModuleList(
             Encoder(self.feature_dims, self.num_heads, self.hidden_dims, self.attention_dropout) for _ in
             range(self.tat_times))
