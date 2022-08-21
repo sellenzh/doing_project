@@ -6,7 +6,7 @@ from math import sqrt
 
 import torch.nn.functional as F
 from entmax import entmax15
-    
+
 
 class pedMondel(nn.Module):
 
@@ -23,11 +23,11 @@ class pedMondel(nn.Module):
         bn_init(self.data_bn, 1)
         self.drop = nn.Dropout(0.25)
         A = np.stack([np.stack([np.eye(nodes)] * 3, axis=0)] * 2, axis=0)
-        #B = np.stack([np.eye(nodes)] * 3, axis=0)
-        
+        # B = np.stack([np.eye(nodes)] * 3, axis=0)
+
         if frames:
             self.conv0 = nn.Sequential(
-                nn.Conv2d(i_ch, self.ch1, kernel_size=3, stride=1, padding=0, bias=False), 
+                nn.Conv2d(i_ch, self.ch1, kernel_size=3, stride=1, padding=0, bias=False),
                 nn.BatchNorm2d(self.ch1), nn.SiLU())
         if vel:
             self.v0 = nn.Sequential(
@@ -37,31 +37,31 @@ class pedMondel(nn.Module):
 
         if frames:
             self.conv1 = nn.Sequential(
-                nn.Conv2d(self.ch1, self.ch1, kernel_size=3, stride=1, padding=0, bias=False), 
+                nn.Conv2d(self.ch1, self.ch1, kernel_size=3, stride=1, padding=0, bias=False),
                 nn.BatchNorm2d(self.ch1), nn.SiLU())
         if vel:
             self.v1 = nn.Sequential(
-                nn.Conv1d(self.ch1, self.ch1, 3, bias=False), 
+                nn.Conv1d(self.ch1, self.ch1, 3, bias=False),
                 nn.BatchNorm1d(self.ch1), nn.SiLU())
         # ----------------------------------------------------------------------------------------------------
         self.l2 = TCN_GCN_unit(self.ch1, self.ch2, A)
 
         if frames:
             self.conv2 = nn.Sequential(
-                nn.Conv2d(self.ch1, self.ch2, kernel_size=2, stride=1, padding=0, bias=False), 
+                nn.Conv2d(self.ch1, self.ch2, kernel_size=2, stride=1, padding=0, bias=False),
                 nn.BatchNorm2d(self.ch2), nn.SiLU())
-            
+
         if vel:
             self.v2 = nn.Sequential(
-                nn.Conv1d(self.ch1, self.ch2, kernel_size=2, bias=False), 
+                nn.Conv1d(self.ch1, self.ch2, kernel_size=2, bias=False),
                 nn.BatchNorm1d(self.ch2), nn.SiLU())
 
         self.gap = nn.AdaptiveAvgPool2d(1)
-        
+
         self.att = nn.Sequential(
             nn.SiLU(),
             nn.Linear(self.ch2, self.ch2, bias=False),
-            nn.BatchNorm1d(self.ch2), 
+            nn.BatchNorm1d(self.ch2),
             nn.Sigmoid()
         )
 
@@ -77,33 +77,32 @@ class pedMondel(nn.Module):
                 nn.AdaptiveAvgPool1d(1),
                 nn.Sigmoid()
             )
-        
-    
-    def forward(self, kp, frame=None, vel=None): 
+
+    def forward(self, kp, frame=None, vel=None):
 
         N, C, T, V = kp.shape
         kp = kp.permute(0, 1, 3, 2).contiguous().view(N, C * V, T)
         kp = self.data_bn(kp)
-        kp = kp.view(N, C, V, T).permute(0, 1, 3, 2).contiguous()#[2, 4, T, 19]
-        
+        kp = kp.view(N, C, V, T).permute(0, 1, 3, 2).contiguous()  # [2, 4, T, 19]
+
         if self.frames:
-            f1 = self.conv0(frame) #[2, 32, 190, 62]
+            f1 = self.conv0(frame)  # [2, 32, 190, 62]
         if self.vel:
-            v1 = self.v0(vel)#[2, 32, T-2]
+            v1 = self.v0(vel)  # [2, 32, T-2]
 
         x1 = self.l1(kp)
         if self.frames:
-            f1 = self.conv1(f1)   
+            f1 = self.conv1(f1)
             x1.mul(self.pool_sigm_2d(f1))
-        if self.vel:   
+        if self.vel:
             v1 = self.v1(v1)
             x1 = x1.mul(self.pool_sigm_1d(v1).unsqueeze(-1))
 
         x1 = self.l2(x1)
         if self.frames:
-            f1 = self.conv2(f1) 
+            f1 = self.conv2(f1)
             x1 = x1.mul(self.pool_sigm_2d(f1))
-        if self.vel:  
+        if self.vel:
             v1 = self.v2(v1)
             x1 = x1.mul(self.pool_sigm_1d(v1).unsqueeze(-1))
 
@@ -122,15 +121,18 @@ def conv_init(conv):
     if conv.bias is not None:
         nn.init.constant_(conv.bias, 0)
 
+
 def bn_init(bn, scale):
     nn.init.constant_(bn.weight, scale)
     nn.init.constant_(bn.bias, 0)
+
 
 class conv_residual(nn.Module):
     '''the residual of gcn and temporal attention module
         to adjust channels by using convolution
     '''
-    def __init__(self, in_channels, out_channels,kernel_size=1, stride=1):
+
+    def __init__(self, in_channels, out_channels, kernel_size=1, stride=1):
         super(conv_residual, self).__init__()
 
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride)
@@ -142,6 +144,7 @@ class conv_residual(nn.Module):
     def forward(self, x):
         y = self.conv(x)
         return self.bn(y)
+
 
 class decoupling_gcn(nn.Module):
     def __init__(self, in_channels, out_channels, A, adaptive) -> None:
@@ -155,13 +158,13 @@ class decoupling_gcn(nn.Module):
         self.linear = nn.Linear(self.in_ch, self.out_ch)
 
         self.DecoupleA = nn.Parameter(torch.tensor(np.reshape(A.astype(np.float32), [
-                                      3, 1, 19, 19]), dtype=torch.float32, requires_grad=True).repeat(1, self.groups, 1, 1), requires_grad=True)
+            3, 1, 19, 19]), dtype=torch.float32, requires_grad=True).repeat(1, self.groups, 1, 1), requires_grad=True)
 
         if adaptive:
             self.PA = nn.Parameter(torch.from_numpy(A.astype(np.float32)), requires_grad=True)
         else:
             self.A = torch.autograd.Variable(torch.from_numpy(A.astype(np.float32)), requires_grad=False)
-    
+
         if in_channels != out_channels:
             self.down = nn.Sequential(
                 nn.Conv2d(in_channels, out_channels, 1),
@@ -197,12 +200,12 @@ class decoupling_gcn(nn.Module):
         return A
 
     def forward(self, x):
-        learn_A = self.DecoupleA.repeat(1, self.out_ch // self.groups, 1, 1)# learn_A -> [3, 32, 19, 19]
+        learn_A = self.DecoupleA.repeat(1, self.out_ch // self.groups, 1, 1)  # learn_A -> [3, 32, 19, 19]
         norm_learn_A = torch.cat([self.L2_norm(learn_A[0:1, ...]),
-                            self.L2_norm(learn_A[1:2, ...]),
-                            self.L2_norm(learn_A[2:3, ...])],
-                            0)
-        #norm_A -> [3, 32, 19, 19]
+                                  self.L2_norm(learn_A[1:2, ...]),
+                                  self.L2_norm(learn_A[2:3, ...])],
+                                 0)
+        # norm_A -> [3, 32, 19, 19]
         y = torch.einsum('nctw,cd->ndtw', (x, self.Linear_weight)).contiguous()
         y = y + self.Linear_bias
         y = self.bn0(y)
@@ -216,14 +219,16 @@ class decoupling_gcn(nn.Module):
         y = self.relu(y)
         return y
 
+
 class Embedding_module(nn.Module):
     def __init__(self, in_channels, out_channels, bias=False):
         super(Embedding_module, self).__init__()
         self.out_ch = out_channels
         self.linear = nn.Linear(in_channels, out_channels, bias=bias)
-    
+
     def forward(self, x):
         return self.linear(x) / sqrt(self.out_ch)
+
 
 class Encoder(nn.Module):
     def __init__(self, inputs, heads, hidden, a_dropout=None, f_dropout=None):
@@ -235,7 +240,8 @@ class Encoder(nn.Module):
 
     def forward(self, x, mask=None):
         x = self.layers(x, mask)
-        return self.norm(x)#x
+        return self.norm(x)  # x
+
 
 class EncoderLayer(nn.Module):
     def __init__(self, inputs, heads, hidden, a_dropout=None, f_dropout=None):
@@ -255,6 +261,7 @@ class EncoderLayer(nn.Module):
         y = self.feedforward(y)
         x = x + y
         return x
+
 
 class MultiHeadAttention(nn.Module):
     def __init__(self, heads, inputs, a_dropout=None, f_dropout=None):
@@ -282,6 +289,7 @@ class MultiHeadAttention(nn.Module):
         out = out.view(bs, -1, self.inputs)
         return self.dropout(self.output(out))
 
+
 class ScaledDotProductAttention(nn.Module):
 
     def __init__(self, dropout=None):
@@ -308,6 +316,7 @@ class Mish(nn.Module):
         x = x * (torch.tanh(F.softplus(x)))
         return x
 
+
 class FeedForwardNet(nn.Module):
     def __init__(self, inputs, hidden, dropout):
         '''Implemented feedforward network'''
@@ -323,46 +332,45 @@ class FeedForwardNet(nn.Module):
         x = self.downscale(x)
         return self.dropout(x)
 
+
 class TCN_GCN_unit(nn.Module):
     def __init__(self, in_channels, out_channels, A, stride=1, residual=True, adaptive=True):
         super(TCN_GCN_unit, self).__init__()
-        self.feature_dims = 128
+        #self.feature_dims = 128
         self.num_heads = 8
         self.hidden_dims = 256
         self.attention_dropout = 0.2
         self.tat_times = 5
         self.gcn_times = 1
 
+        self.res = residual
+
         self.gcn = nn.ModuleList()
-        self.gcn.append(decoupling_gcn(in_channels, out_channels, A[0], adaptive))
+        self.gcn.append(decoupling_gcn(out_channels, out_channels, A[0], adaptive))
         i = 0
         while self.gcn_times - 1 > i:
-            self.gcn.append(decoupling_gcn(out_channels, out_channels, A[i+1], adaptive))
-        self.embed = Embedding_module(out_channels, self.feature_dims)
+            self.gcn.append(decoupling_gcn(out_channels, out_channels, A[i + 1], adaptive))
+            i += 1
+        self.embed = Embedding_module(in_channels, out_channels)
         self.tat = nn.ModuleList(
-            Encoder(self.feature_dims, self.num_heads, self.hidden_dims, self.attention_dropout) for _ in range(self.tat_times))
+            Encoder(out_channels, self.num_heads, self.hidden_dims, self.attention_dropout) for _ in
+            range(self.tat_times))
         self.relu = nn.ReLU(inplace=True)
-        if not residual:
-            self.residual = lambda x: 0
 
-        elif (in_channels == out_channels) and (stride == 1):
-            self.residual = lambda x: x
+        self.linear = nn.Linear(out_channels, out_channels)
 
-        else:
-            self.residual = conv_residual(in_channels, out_channels, kernel_size=1, stride=stride)
-        self.linear = nn.Linear(self.feature_dims, out_channels)
-
-    def forward(self, x):#x->[2, 4, T, 19]
+    def forward(self, x):  # x->[2, 4, T, 19]
+        x = self.embed(x.permute(0, 3, 2, 1)).permute(0, 3, 2, 1)
         for i in range(self.gcn_times):
             gcn = self.gcn[i](x)
-            res = x if i != 0 and self.res else self.residual(x)
+            res = x if self.res else 0
             x = gcn + res
         B, C, T, V = x.size()
-        tcn = self.embed(x.permute(0, 3, 2, 1)).contiguous().view(B*V, T, -1)
+        tcn = x.contiguous().view(B * V, T, -1)
         for i in range(self.tat_times):
             memory = tcn
             tcn = self.tat[i](tcn)
             tcn += memory
-        y = self.linear(tcn).contiguous().view(B, -1, T, V)
+        y = self.linear(tcn).contiguous().view(B, V, T, -1).permute(0, 3, 2, 1)
         y = self.relu(y)
         return y
