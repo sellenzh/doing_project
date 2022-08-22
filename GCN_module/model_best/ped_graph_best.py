@@ -15,14 +15,16 @@ class pedMondel(nn.Module):
         self.frames = frames
         self.vel = vel
         self.n_clss = n_clss
-        self.ch = 4 if h3d else 3
+        self.ch = 4
         self.ch1, self.ch2 = 32, 64
-        i_ch = 4 if seg else 3
+        i_ch = 4
+
+        self.hid_v = 32
 
         self.data_bn = nn.BatchNorm1d(self.ch * nodes)
         bn_init(self.data_bn, 1)
         self.drop = nn.Dropout(0.25)
-        A = np.stack([np.stack([np.eye(nodes)] * 3, axis=0)] * 2, axis=0)
+        A = np.stack([np.eye(nodes)] * 3, axis=0)
         # B = np.stack([np.eye(nodes)] * 3, axis=0)
 
         if frames:
@@ -30,21 +32,28 @@ class pedMondel(nn.Module):
                 nn.Conv2d(i_ch, self.ch1, kernel_size=3, stride=1, padding=0, bias=False),
                 nn.BatchNorm2d(self.ch1), nn.SiLU())
         if vel:
-            self.v0 = nn.Sequential(
-                nn.Conv1d(2, self.ch1, 3, bias=False), nn.BatchNorm1d(self.ch1), nn.SiLU())
+            #self.v0 = nn.Sequential(nn.Conv1d(2, self.ch1, 3, bias=False), nn.BatchNorm1d(self.ch1), nn.SiLU())
+            self.linear1 = nn.Linear(2, self.ch1)
+            self.bn_vel1 = nn.BatchNorm1d(self.ch1)
+            self.relu = nn.ReLU(inplace=True)
+            '''self.linear_vel = nn.Sequential(
+                nn.SiLU(), nn.Linear(1, self.hid_v), nn.BatchNorm2d(self.ch1), nn.Linear(self.hid_v, nodes), nn.SiLU()
+            )'''
         # ----------------------------------------------------------------------------------------------------
         self.l1 = TCN_GCN_unit(self.ch, self.ch1, A, residual=False)
+        self.linear_fusion1 = nn.Linear(nodes + 1, nodes)
 
         if frames:
             self.conv1 = nn.Sequential(
                 nn.Conv2d(self.ch1, self.ch1, kernel_size=3, stride=1, padding=0, bias=False),
                 nn.BatchNorm2d(self.ch1), nn.SiLU())
-        if vel:
+        '''if vel:
             self.v1 = nn.Sequential(
                 nn.Conv1d(self.ch1, self.ch1, 3, bias=False),
-                nn.BatchNorm1d(self.ch1), nn.SiLU())
+                nn.BatchNorm1d(self.ch1), nn.SiLU())'''
         # ----------------------------------------------------------------------------------------------------
         self.l2 = TCN_GCN_unit(self.ch1, self.ch2, A)
+        self.linear_fusion2 = nn.Linear(nodes + 1, nodes)
 
         if frames:
             self.conv2 = nn.Sequential(
@@ -52,9 +61,11 @@ class pedMondel(nn.Module):
                 nn.BatchNorm2d(self.ch2), nn.SiLU())
 
         if vel:
-            self.v2 = nn.Sequential(
+            '''self.v2 = nn.Sequential(
                 nn.Conv1d(self.ch1, self.ch2, kernel_size=2, bias=False),
-                nn.BatchNorm1d(self.ch2), nn.SiLU())
+                nn.BatchNorm1d(self.ch2), nn.SiLU())'''
+            self.linear2 = nn.Linear(self.ch1, self.ch2)
+            self.bn_vel2 = nn.BatchNorm1d(self.ch2)
 
         self.gap = nn.AdaptiveAvgPool2d(1)
 
@@ -68,12 +79,12 @@ class pedMondel(nn.Module):
         self.linear = nn.Linear(self.ch2, self.n_clss)
         nn.init.normal_(self.linear.weight, 0, math.sqrt(2. / self.n_clss))
         # pooling sigmoid fucntion for image feature fusion
-        self.pool_sigm_2d = nn.Sequential(
+        self.pool_sig_2d = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
             nn.Sigmoid()
         )
         if vel:
-            self.pool_sigm_1d = nn.Sequential(
+            self.pool_sig_1d = nn.Sequential(
                 nn.AdaptiveAvgPool1d(1),
                 nn.Sigmoid()
             )
@@ -85,26 +96,37 @@ class pedMondel(nn.Module):
         kp = self.data_bn(kp)
         kp = kp.view(N, C, V, T).permute(0, 1, 3, 2).contiguous()  # [2, 4, T, 19]
 
+        vel = vel[:, :, -T:]
+
         if self.frames:
             f1 = self.conv0(frame)  # [2, 32, 190, 62]
         if self.vel:
-            v1 = self.v0(vel)  # [2, 32, T-2]
+            #v1 = self.v0(vel)  # [2, 32, T-2]
+            v1 = self.linear1(vel.permute(0, 2, 1)).permute(0, 2, 1)
+            v1 = self.relu(self.bn_vel1(v1))
+            #v1 = self.linear_vel(v1.unsqueeze(-1))
 
         x1 = self.l1(kp)
         if self.frames:
             f1 = self.conv1(f1)
-            x1.mul(self.pool_sigm_2d(f1))
+            x1.mul(self.pool_sig_2d(f1))
         if self.vel:
-            v1 = self.v1(v1)
-            x1 = x1.mul(self.pool_sigm_1d(v1).unsqueeze(-1))
+            #v1 = self.v1(v1)
+            #x1 = x1.mul(self.pool_sig_1d(v1).unsqueeze(-1))
+            x1 = torch.cat([x1, v1.unsqueeze(-1)], dim=-1)
+            x1 = self.linear_fusion1(x1)
 
         x1 = self.l2(x1)
         if self.frames:
             f1 = self.conv2(f1)
-            x1 = x1.mul(self.pool_sigm_2d(f1))
+            x1 = x1.mul(self.pool_sig_2d(f1))
         if self.vel:
-            v1 = self.v2(v1)
-            x1 = x1.mul(self.pool_sigm_1d(v1).unsqueeze(-1))
+            #v1 = self.v2(v1)
+            #x1 = x1.mul(self.pool_sig_1d(v1).unsqueeze(-1))
+            v1 = self.linear2(v1.permute(0, 2, 1)).permute(0, 2, 1)
+            v1 = self.relu(self.bn_vel2(v1))
+            x1 = torch.cat([x1, v1.unsqueeze(-1)], dim=-1)
+            x1 = self.linear_fusion2(x1)
 
         x1 = self.gap(x1).squeeze(-1)
         x1 = x1.squeeze(-1)
@@ -185,12 +207,12 @@ class decoupling_gcn(nn.Module):
         bn_init(self.bn, 1e-6)
 
         self.Linear_weight = nn.Parameter(torch.zeros(
-            in_channels, out_channels * self.subnet, requires_grad=True, device='cuda'), requires_grad=True)
+            in_channels, out_channels * self.subnet, requires_grad=True), requires_grad=True)
         nn.init.normal_(self.Linear_weight, 0, math.sqrt(
             0.5 / (out_channels * self.subnet)))
 
         self.Linear_bias = nn.Parameter(torch.zeros(
-            1, out_channels * self.subnet, 1, 1, requires_grad=True, device='cuda'), requires_grad=True)
+            1, out_channels * self.subnet, 1, 1, requires_grad=True), requires_grad=True)
         nn.init.constant_(self.Linear_bias, 1e-6)
 
     def L2_norm(self, A):
@@ -336,41 +358,50 @@ class FeedForwardNet(nn.Module):
 class TCN_GCN_unit(nn.Module):
     def __init__(self, in_channels, out_channels, A, stride=1, residual=True, adaptive=True):
         super(TCN_GCN_unit, self).__init__()
-        #self.feature_dims = 128
+        self.feature_dims = 128
         self.num_heads = 8
+        #self.linear_hidden = 256
         self.hidden_dims = 256
-        self.attention_dropout = 0.2
+        self.attention_dropout = 0.3
         self.tat_times = 5
-        self.gcn_times = 1
 
-        self.res = residual
+        self.gcn = decoupling_gcn(in_channels, out_channels, A, adaptive)
 
-        self.gcn = nn.ModuleList()
-        self.gcn.append(decoupling_gcn(out_channels, out_channels, A[0], adaptive))
-        i = 0
-        while self.gcn_times - 1 > i:
-            self.gcn.append(decoupling_gcn(out_channels, out_channels, A[i + 1], adaptive))
-            i += 1
-        self.embed = Embedding_module(in_channels, out_channels)
+        self.embed = Embedding_module(out_channels, self.feature_dims)
         self.tat = nn.ModuleList(
-            Encoder(out_channels, self.num_heads, self.hidden_dims, self.attention_dropout) for _ in
+            Encoder(self.feature_dims, self.num_heads, self.hidden_dims, self.attention_dropout) for _ in
             range(self.tat_times))
         self.relu = nn.ReLU(inplace=True)
 
-        self.linear = nn.Linear(out_channels, out_channels)
+        if not residual:
+            self.residual = lambda x: 0
+        elif in_channels == out_channels and stride == 1:
+            self.residual = lambda x: x
+        else:
+            #self.residual = lambda x: x
+            self.residual = conv_residual(in_channels, out_channels, kernel_size=1, stride=stride)
+
+        #self.linear2hid = nn.Linear(self.feature_dims, self.)
+        self.linear = nn.Linear(self.feature_dims, out_channels)
 
     def forward(self, x):  # x->[2, 4, T, 19]
-        x = self.embed(x.permute(0, 3, 2, 1)).permute(0, 3, 2, 1)
-        for i in range(self.gcn_times):
-            gcn = self.gcn[i](x)
-            res = x if self.res else 0
-            x = gcn + res
+        gcn = self.gcn(x)
+        res = self.residual(x)
+        x = gcn + res
         B, C, T, V = x.size()
-        tcn = x.contiguous().view(B * V, T, -1)
+        tcn = self.embed(x.permute(0, 3, 2, 1)).contiguous().view(B * V, T, -1)
         for i in range(self.tat_times):
-            memory = tcn
-            tcn = self.tat[i](tcn)
-            tcn += memory
+            #tcn = self.linear2hid(tcn)
+            tcn += self.tat[i](tcn)
         y = self.linear(tcn).contiguous().view(B, V, T, -1).permute(0, 3, 2, 1)
         y = self.relu(y)
         return y
+
+import random
+T = random.randint(2, 62)
+kp = torch.randn(size=(16, 4, T, 19))
+vel = torch.randn(size=(16, 2, T))
+img = torch.randn(size=(16, 4, 192, 64))
+model = pedMondel(frames=True, vel=True, n_clss=3)
+y = model(kp, img, vel)
+print(y.size())
