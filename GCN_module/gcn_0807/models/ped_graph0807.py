@@ -1,5 +1,4 @@
 import math
-from re import X
 import torch
 from torch import nn
 import numpy as np
@@ -16,9 +15,8 @@ class pedMondel(nn.Module):
         self.frames = frames
         self.vel = vel
         self.n_clss = n_clss
-        self.ch = 4 if h3d else 3
+        self.ch = 4
         self.ch1, self.ch2 = 32, 64
-        i_ch = 4 if seg else 3
 
         self.data_bn = nn.BatchNorm1d(self.ch * nodes)
         bn_init(self.data_bn, 1)
@@ -28,7 +26,7 @@ class pedMondel(nn.Module):
 
         if frames:
             self.conv0 = nn.Sequential(
-                nn.Conv2d(i_ch, self.ch1, kernel_size=3, stride=1, padding=0, bias=False),
+                nn.Conv2d(self.ch, self.ch1, kernel_size=3, stride=1, padding=0, bias=False),
                 nn.BatchNorm2d(self.ch1), nn.SiLU())
         if vel:
             self.v0 = nn.Sequential(
@@ -331,10 +329,10 @@ class FeedForwardNet(nn.Module):
 class TCN_GCN_unit(nn.Module):
     def __init__(self, in_channels, out_channels, A, stride=1, residual=True, adaptive=True):
         super(TCN_GCN_unit, self).__init__()
-        self.feature_dims = 128
+        self.feature_dims = out_channels * 3
         self.num_heads = 8
-        self.hidden_dims = 256
-        self.attention_dropout = 0.2
+        self.hidden_dims = out_channels * 6
+        self.attention_dropout = 0.3
         self.tat_times = 5
 
         self.res = residual
