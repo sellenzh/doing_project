@@ -7,7 +7,7 @@ from entmax import entmax15
 class CrossTransformer(nn.Module):
     def __init__(self, inputs):
         super(CrossTransformer, self).__init__()
-        self.heads = 2
+        self.heads = 8
         self.attention = MultiHeadAttention(self.heads, inputs)
 
     def forward(self, x, y):
@@ -42,7 +42,7 @@ class MultiHeadAttention(nn.Module):
         self.heads = heads
         self.inputs = inputs
         assert inputs % heads == 0
-        self.hidden = self.hid // heads
+        self.hidden = self.inputs // heads
 
         self.attention = ScaledDotProductAttention(a_dropout)
         self.linear_q = nn.Linear(inputs, inputs)
@@ -53,23 +53,11 @@ class MultiHeadAttention(nn.Module):
 
     def forward(self, q, k, v):
         bs = q.size(0)
-        q = self.linear_q(q).view(bs, -1, self.heads, self.hidden).transpose(1, 2)
-        k = self.linear_k(k).view(bs, -1, self.heads, self.hidden).transpose(1, 2)
-        v = self.linear_v(v).view(bs, -1, self.heads, self.hidden).transpose(1, 2)
+        q_w = self.linear_q(q).view(bs, -1, self.heads, self.hidden).transpose(1, 2)
+        k_w = self.linear_k(k).view(bs, -1, self.heads, self.hidden).transpose(1, 2)
+        v_w = self.linear_v(v).view(bs, -1, self.heads, self.hidden).transpose(1, 2)
 
-        out = self.attention(q, k, v).transpose(1, 2).contiguous()
+        out = self.attention(q_w, k_w, v_w).transpose(1, 2).contiguous()
         out = out.view(bs, -1, self.inputs)
         y = self.dropout(self.output(out))
         return y
-
-'''model = CrossTransformer(inputs=32)
-model2 = CrossTransformer(inputs=64)
-import random
-T = random.randint(2, 62)
-tensor1 = torch.randn(size=(16, 32, T, 19))
-tensor2 = torch.randn(size=(16, 64, T, 19))
-spe1 = torch.randn(size=(16, 32, T))
-spe2 = torch.randn(size=(16, 64, T))
-f1 = model(tensor1, spe1)
-f2 = model2(tensor2, spe2)
-print(f1.size(), f2.size())'''
