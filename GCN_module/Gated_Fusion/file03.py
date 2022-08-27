@@ -58,7 +58,7 @@ class MultiHeadAttention(nn.Module):
         v = self.linear_v(v).view(bs, -1, self.heads, self.hidden).transpose(1, 2)
 
         out = self.attention(q, k, v).transpose(1, 2).contiguous()
-        out = out.view(bs, -1, self.hid)
+        out = out.view(bs, -1, self.inputs)
         y = self.dropout(self.output(out))
         return y
 
