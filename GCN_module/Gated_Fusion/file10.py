@@ -87,7 +87,7 @@ class pedMondel(nn.Module):
                 nn.BatchNorm1d(self.ch2), nn.ReLU()
             )
             self.vel_node2 = nn.Sequential(
-                nn.Linear(19, self.ch2 * 3), nn.ReLU(),
+                nn.Linear(1, self.ch2 * 3), nn.ReLU(),
                 nn.Linear(self.ch2 * 3, self.ch2 * 3), nn.ReLU(),
                 nn.Linear(self.ch2 * 3, 19), nn.ReLU()
             )
@@ -155,10 +155,10 @@ class pedMondel(nn.Module):
             #velocity = self.vel2(velocity.permute(0, 2, 1)).permute(0, 2, 1)
             velocity = self.vel2(velocity)
             velocity = self.relu1(self.bn1(velocity))
-            velocity_node = self.vel_node2(velocity_node)
+            velocity_node = self.vel_node2(velocity.unsqueeze(-1))
             pose_att = self.cross2(pose, velocity)
             gate2 = self.gated2(pose, pose_att)
-            pose = self.gatde22(gate2, velocity_node)
+            pose = self.gated22(gate2, velocity_node)
 
         if self.frames:
             f1 = self.conv2(f1)
@@ -433,6 +433,6 @@ T = random.randint(2, 62)
 model = pedMondel(frames=True, vel=True, seg=True, h3d=True, nodes=19, n_clss=1)
 pose = torch.randn(size=(16, 4, T, 19))
 img = torch.randn(size=(16, 4, 192, 64))
-vel = torch.randn(size=(16, 2, 32))
+vel = torch.randn(size=(16, 2, T))
 y = model(pose, img, vel)
 print(y.size())'''
