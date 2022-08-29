@@ -8,12 +8,12 @@ class FC(nn.Module):
         #self.conv = nn.Conv2d(dims, dims, kernel_size=1, stride=1)
         #self.linear = nn.Linear(dims, dims)#way1
         self.layers = nn.Sequential(
-            nn.Linear(dims, self.hidden), nn.SiLU(),
-            nn.Linear(self.hidden, self.hidden), nn.SiLU(),
-            nn.Linear(self.hidden, dims), nn.SiLU()
+            nn.Linear(dims, self.hidden), nn.ReLU(),
+            nn.Linear(self.hidden, self.hidden), nn.ReLU(),
+            nn.Linear(self.hidden, dims), nn.ReLU()
         )#way2
         self.bn = nn.BatchNorm2d(dims)
-        self.act = activation if activation is not None else nn.SiLU()
+        self.act = activation if activation is not None else nn.ReLU()
         self.dropout = nn.Dropout(p=dropout) if dropout is not None else nn.Identity()
 
     def forward(self, x):
