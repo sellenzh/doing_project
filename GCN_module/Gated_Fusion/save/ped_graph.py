@@ -40,9 +40,9 @@ class pedMondel(nn.Module):
             )'''
             self.vel1 = nn.Sequential(
                 nn.Conv1d(2, self.ch1 * 2, kernel_size=1, stride=1, padding=0, bias=True),
-                nn.BatchNorm1d(self.ch1 * 2), nn.ReLU(),
+                nn.BatchNorm1d(self.ch1 * 2), Mish(),
                 nn.Conv1d(self.ch1 * 2, self.ch1, kernel_size=1, stride=1, padding=0, bias=True),
-                nn.BatchNorm1d(self.ch1), nn.ReLU()
+                nn.BatchNorm1d(self.ch1), Mish()
             )
         # ----------------------------------------------------------------------------------------------------
         self.l1 = TCN_GCN_unit(self.ch, self.ch1, A, residual=False)
@@ -75,9 +75,9 @@ class pedMondel(nn.Module):
             )'''
             self.vel2 = nn.Sequential(
                 nn.Conv1d(self.ch1, self.ch2 * 2, kernel_size=1, stride=1, padding=0, bias=True),
-                nn.BatchNorm1d(self.ch2 * 2), nn.ReLU(),
+                nn.BatchNorm1d(self.ch2 * 2), Mish(),
                 nn.Conv1d(self.ch2 * 2, self.ch2, kernel_size=1, stride=1, padding=0, bias=True),
-                nn.BatchNorm1d(self.ch2), nn.ReLU()
+                nn.BatchNorm1d(self.ch2), Mish()
             )
             self.cross2 = CrossTransformer(self.ch2)
             self.gated2 = GatedFusion(self.ch2)
