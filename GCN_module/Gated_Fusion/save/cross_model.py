@@ -10,9 +10,9 @@ class CrossTransformer(nn.Module):
         self.heads = 8
         self.attention = MultiHeadAttention(self.heads, inputs)
         self.mlp = nn.Sequential(
-            nn.Linear(1, inputs), nn.ReLU(),
-            nn.Linear(inputs, inputs), nn.ReLU(),
-            nn.Linear(inputs, 19), nn.ReLU()
+            nn.Linear(1, inputs), nn.SiLU(),
+            nn.Linear(inputs, inputs), nn.SiLU(),
+            nn.Linear(inputs, 19), nn.SiLU()
         )# k, v -> [..., 19, 32]
 
     def forward(self, x, y):
