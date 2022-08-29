@@ -40,10 +40,12 @@ class pedMondel(nn.Module):
             )'''
             self.vel1 = nn.Sequential(
                 nn.Conv1d(2, self.ch1 * 2, kernel_size=1, stride=1, padding=0, bias=True),
-                nn.BatchNorm1d(self.ch1 * 2), Mish(),
+                nn.BatchNorm1d(self.ch1 * 2), nn.SiLU(),
                 nn.Conv1d(self.ch1 * 2, self.ch1, kernel_size=1, stride=1, padding=0, bias=True),
-                nn.BatchNorm1d(self.ch1), Mish()
+                nn.BatchNorm1d(self.ch1), nn.ReLU()
             )
+            self.bn0 = nn.BatchNorm1d(self.ch1)
+            self.relu0 = nn.ReLU()
         # ----------------------------------------------------------------------------------------------------
         self.l1 = TCN_GCN_unit(self.ch, self.ch1, A, residual=False)
 
@@ -75,10 +77,12 @@ class pedMondel(nn.Module):
             )'''
             self.vel2 = nn.Sequential(
                 nn.Conv1d(self.ch1, self.ch2 * 2, kernel_size=1, stride=1, padding=0, bias=True),
-                nn.BatchNorm1d(self.ch2 * 2), Mish(),
+                nn.BatchNorm1d(self.ch2 * 2), nn.SiLU(),
                 nn.Conv1d(self.ch2 * 2, self.ch2, kernel_size=1, stride=1, padding=0, bias=True),
-                nn.BatchNorm1d(self.ch2), Mish()
+                nn.BatchNorm1d(self.ch2), nn.ReLU()
             )
+            self.bn1 = nn.BatchNorm1d(self.ch2)
+            self.relu1 = nn.ReLU()
             self.cross2 = CrossTransformer(self.ch2)
             self.gated2 = GatedFusion(self.ch2)
 
@@ -117,6 +121,7 @@ class pedMondel(nn.Module):
             v1 = self.v0(vel)  # [2, 32, T-2]
             #velocity = self.vel1(vel[:, :, -T:].permute(0, 2, 1)).permute(0, 2, 1)
             velocity = self.vel1(vel[:, :, -T:])
+            velocity = self.relu0(self.bn0(velocity))
 
         pose = self.l1(kp)
         if self.vel:
@@ -133,7 +138,9 @@ class pedMondel(nn.Module):
         if self.vel:
             v1 = self.v2(v1)
             pose_mul = pose.mul(self.pool_sig_1d(v1).unsqueeze(-1))
+            #velocity = self.vel2(velocity.permute(0, 2, 1)).permute(0, 2, 1)
             velocity = self.vel2(velocity)
+            velocity = self.relu1(self.bn1(velocity))
             pose_att = self.cross2(pose, velocity)
             pose = self.gated2(pose_mul, pose_att)
 
