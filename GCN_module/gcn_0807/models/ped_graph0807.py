@@ -67,12 +67,12 @@ class pedMondel(nn.Module):
         self.linear = nn.Linear(self.ch2, self.n_clss)
         nn.init.normal_(self.linear.weight, 0, math.sqrt(2. / self.n_clss))
         # pooling sigmoid fucntion for image feature fusion
-        self.pool_sigm_2d = nn.Sequential(
+        self.pool_sig_2d = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
             nn.Sigmoid()
         )
         if vel:
-            self.pool_sigm_1d = nn.Sequential(
+            self.pool_sig_1d = nn.Sequential(
                 nn.AdaptiveAvgPool1d(1),
                 nn.Sigmoid()
             )
@@ -92,18 +92,18 @@ class pedMondel(nn.Module):
         x1 = self.l1(kp)
         if self.frames:
             f1 = self.conv1(f1)
-            x1.mul(self.pool_sigm_2d(f1))
+            x1.mul(self.pool_sig_2d(f1))
         if self.vel:
             v1 = self.v1(v1)
-            x1 = x1.mul(self.pool_sigm_1d(v1).unsqueeze(-1))
+            x1 = x1.mul(self.pool_sig_1d(v1).unsqueeze(-1))
 
         x1 = self.l2(x1)
         if self.frames:
             f1 = self.conv2(f1)
-            x1 = x1.mul(self.pool_sigm_2d(f1))
+            x1 = x1.mul(self.pool_sig_2d(f1))
         if self.vel:
             v1 = self.v2(v1)
-            x1 = x1.mul(self.pool_sigm_1d(v1).unsqueeze(-1))
+            x1 = x1.mul(self.pool_sig_1d(v1).unsqueeze(-1))
 
         x1 = self.gap(x1).squeeze(-1)
         x1 = x1.squeeze(-1)
