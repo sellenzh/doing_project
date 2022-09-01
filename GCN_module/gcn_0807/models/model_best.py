@@ -7,9 +7,7 @@ from math import sqrt
 import torch.nn.functional as F
 from entmax import entmax15
 
-
 class pedMondel(nn.Module):
-
     def __init__(self, frames, vel=False, seg=False, h3d=True, nodes=19, n_clss=1):
         super(pedMondel, self).__init__()
         self.frames = frames
@@ -22,7 +20,6 @@ class pedMondel(nn.Module):
         bn_init(self.data_bn, 1)
         self.drop = nn.Dropout(0.25)
         A = np.stack([np.eye(nodes)] * 3, axis=0)
-        # B = np.stack([np.eye(nodes)] * 3, axis=0)
 
         if frames:
             self.conv0 = nn.Sequential(
@@ -49,14 +46,12 @@ class pedMondel(nn.Module):
             self.conv2 = nn.Sequential(
                 nn.Conv2d(self.ch1, self.ch2, kernel_size=2, stride=1, padding=0, bias=False),
                 nn.BatchNorm2d(self.ch2), nn.SiLU())
-
         if vel:
             self.v2 = nn.Sequential(
                 nn.Conv1d(self.ch1, self.ch2, kernel_size=2, bias=False),
                 nn.BatchNorm1d(self.ch2), nn.SiLU())
 
         self.gap = nn.AdaptiveAvgPool2d(1)
-
         self.att = nn.Sequential(
             nn.SiLU(),
             nn.Linear(self.ch2, self.ch2, bias=False),
@@ -66,13 +61,12 @@ class pedMondel(nn.Module):
 
         self.linear = nn.Linear(self.ch2, self.n_clss)
         nn.init.normal_(self.linear.weight, 0, math.sqrt(2. / self.n_clss))
-        # pooling sigmoid fucntion for image feature fusion
-        self.pool_sigm_2d = nn.Sequential(
+        self.pool_sig_2d = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
             nn.Sigmoid()
         )
         if vel:
-            self.pool_sigm_1d = nn.Sequential(
+            self.pool_sig_1d = nn.Sequential(
                 nn.AdaptiveAvgPool1d(1),
                 nn.Sigmoid()
             )
@@ -92,18 +86,18 @@ class pedMondel(nn.Module):
         x1 = self.l1(kp)
         if self.frames:
             f1 = self.conv1(f1)
-            x1.mul(self.pool_sigm_2d(f1))
+            x1 = x1.mul(self.pool_sig_2d(f1))
         if self.vel:
             v1 = self.v1(v1)
-            x1 = x1.mul(self.pool_sigm_1d(v1).unsqueeze(-1))
+            x1 = x1.mul(self.pool_sig_1d(v1).unsqueeze(-1))
 
         x1 = self.l2(x1)
         if self.frames:
             f1 = self.conv2(f1)
-            x1 = x1.mul(self.pool_sigm_2d(f1))
+            x1 = x1.mul(self.pool_sig_2d(f1))
         if self.vel:
             v1 = self.v2(v1)
-            x1 = x1.mul(self.pool_sigm_1d(v1).unsqueeze(-1))
+            x1 = x1.mul(self.pool_sig_1d(v1).unsqueeze(-1))
 
         x1 = self.gap(x1).squeeze(-1)
         x1 = x1.squeeze(-1)
@@ -113,24 +107,20 @@ class pedMondel(nn.Module):
 
         return x1
 
-
 def conv_init(conv):
     if conv.weight is not None:
         nn.init.kaiming_normal_(conv.weight, mode='fan_out')
     if conv.bias is not None:
         nn.init.constant_(conv.bias, 0)
 
-
 def bn_init(bn, scale):
     nn.init.constant_(bn.weight, scale)
     nn.init.constant_(bn.bias, 0)
-
 
 class conv_residual(nn.Module):
     '''the residual of gcn and temporal attention module
         to adjust channels by using convolution
     '''
-
     def __init__(self, in_channels, out_channels, kernel_size=1, stride=1):
         super(conv_residual, self).__init__()
 
@@ -155,7 +145,6 @@ class decoupling_gcn(nn.Module):
         self.adaptive = adaptive
 
         self.linear = nn.Linear(self.in_ch, self.out_ch)
-
         self.DecoupleA = nn.Parameter(torch.tensor(np.reshape(A.astype(np.float32), [
             3, 1, 19, 19]), dtype=torch.float32, requires_grad=True).repeat(1, self.groups, 1, 1), requires_grad=True)
 
@@ -285,7 +274,6 @@ class MultiHeadAttention(nn.Module):
 
 
 class ScaledDotProductAttention(nn.Module):
-
     def __init__(self, dropout=None):
         '''Implemented simple attention'''
         super(ScaledDotProductAttention, self).__init__()
@@ -304,12 +292,10 @@ class ScaledDotProductAttention(nn.Module):
 class Mish(nn.Module):
     def __init__(self):
         super().__init__()
-        print("Mish avtivation loaded...")
 
     def forward(self, x):
         x = x * (torch.tanh(F.softplus(x)))
         return x
-
 
 class FeedForwardNet(nn.Module):
     def __init__(self, inputs, hidden, dropout):
