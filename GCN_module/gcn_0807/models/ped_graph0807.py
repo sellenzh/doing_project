@@ -18,11 +18,6 @@ class pedMondel(nn.Module):
         self.ch = 4
         self.ch1, self.ch2 = 32, 64
 
-        '''self.cross1 = CrossTransformer(inputs=32)
-        self.cross2 = CrossTransformer(inputs=64)
-        self.gated1 = GatedFusion(dims=32)
-        self.gated2 = GatedFusion(dims=64)'''
-
         self.data_bn = nn.BatchNorm1d(self.ch * nodes)
         bn_init(self.data_bn, 1)
         self.drop = nn.Dropout(0.25)
@@ -37,8 +32,6 @@ class pedMondel(nn.Module):
                 nn.Conv1d(2, self.ch1, 3, bias=False), nn.BatchNorm1d(self.ch1), nn.SiLU())
         # ----------------------------------------------------------------------------------------------------
         self.l1 = TCN_GCN_unit(self.ch, self.ch1, A, residual=False)
-        #self.cross1 = CrossTransformer(inputs=32)
-        #self.gate1 = GatedFusion(dims=32)
 
         if frames:
             self.conv1 = nn.Sequential(
@@ -50,8 +43,6 @@ class pedMondel(nn.Module):
                 nn.BatchNorm1d(self.ch1), nn.SiLU())
         # ----------------------------------------------------------------------------------------------------
         self.l2 = TCN_GCN_unit(self.ch1, self.ch2, A)
-        #self.cross2 = CrossTransformer(inputs=64)
-        #self.gate2 = GatedFusion(dims=64)
 
         if frames:
             self.conv2 = nn.Sequential(
@@ -293,7 +284,6 @@ class ScaledDotProductAttention(nn.Module):
 class Mish(nn.Module):
     def __init__(self):
         super().__init__()
-        print("Mish avtivation loaded...")
 
     def forward(self, x):
         x = x * (torch.tanh(F.softplus(x)))
