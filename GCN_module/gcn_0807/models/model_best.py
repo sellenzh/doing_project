@@ -20,28 +20,30 @@ class pedMondel(nn.Module):
         self.drop = nn.Dropout(0.25)
         A = np.stack([np.eye(nodes)] * 3, axis=0)
 
-        self.conv0 = nn.Sequential(
+        self.img1 = nn.Sequential(
                 nn.Conv2d(self.ch, self.ch1, kernel_size=3, stride=1, padding=0, bias=False),
                 nn.BatchNorm2d(self.ch1), nn.SiLU())
-        self.v0 = nn.Sequential(
+
+        self.vel1 = nn.Sequential(
                 nn.Conv1d(2, self.ch1, 3, bias=False), nn.BatchNorm1d(self.ch1), nn.SiLU())
         # ----------------------------------------------------------------------------------------------------
-        self.l1 = TCN_GCN_unit(self.ch, self.ch1, A, residual=False)
+        self.layer1 = TCN_GCN_unit(self.ch, self.ch1, A, residual=False)
 
-        self.conv1 = nn.Sequential(
+        self.img2 = nn.Sequential(
                 nn.Conv2d(self.ch1, self.ch1, kernel_size=3, stride=1, padding=0, bias=False),
                 nn.BatchNorm2d(self.ch1), nn.SiLU())
-        self.v1 = nn.Sequential(
+
+        self.vel2 = nn.Sequential(
                 nn.Conv1d(self.ch1, self.ch1, 3, bias=False),
                 nn.BatchNorm1d(self.ch1), nn.SiLU())
         # ----------------------------------------------------------------------------------------------------
-        self.l2 = TCN_GCN_unit(self.ch1, self.ch2, A)
+        self.layer2 = TCN_GCN_unit(self.ch1, self.ch2, A)
 
-        self.conv2 = nn.Sequential(
+        self.img3 = nn.Sequential(
                 nn.Conv2d(self.ch1, self.ch2, kernel_size=2, stride=1, padding=0, bias=False),
                 nn.BatchNorm2d(self.ch2), nn.SiLU())
 
-        self.v2 = nn.Sequential(
+        self.vel3 = nn.Sequential(
                 nn.Conv1d(self.ch1, self.ch2, kernel_size=2, bias=False),
                 nn.BatchNorm1d(self.ch2), nn.SiLU())
 
@@ -56,15 +58,17 @@ class pedMondel(nn.Module):
 
         self.linear = nn.Linear(self.ch2, self.n_clss)
         nn.init.normal_(self.linear.weight, 0, math.sqrt(2. / self.n_clss))
+
         self.pool_sig_2d = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
             nn.Sigmoid()
         )
-        if vel:
-            self.pool_sig_1d = nn.Sequential(
+        
+        self.pool_sig_1d = nn.Sequential(
                 nn.AdaptiveAvgPool1d(1),
                 nn.Sigmoid()
             )
+        # ----------------------------------------------------------------------------------------------------
 
     def forward(self, kp, frame=None, vel=None):
 
@@ -73,28 +77,28 @@ class pedMondel(nn.Module):
         kp = self.data_bn(kp)
         kp = kp.view(N, C, V, T).permute(0, 1, 3, 2).contiguous()  # [2, 4, T, 19]
 
-        f1 = self.conv0(frame)  # [2, 32, 190, 62]
-        v1 = self.v0(vel)  # [2, 32, T-2]
+        f1 = self.img1(frame)  # [2, 32, 190, 62]
+        v1 = self.vel1(vel)  # [2, 32, T-2]
 
-        x1 = self.l1(kp)
-        f1 = self.conv1(f1)
-        x1.mul(self.pool_sig_2d(f1))
-        v1 = self.v1(v1)
-        x1 = x1.mul(self.pool_sig_1d(v1).unsqueeze(-1))
+        pose = self.layer1(kp)
+        f1 = self.img2(f1)
+        pose.mul(self.pool_sig_2d(f1))
+        v1 = self.vel2(v1)
+        pose = pose.mul(self.pool_sig_1d(v1).unsqueeze(-1))
 
-        x1 = self.l2(x1)
-        f1 = self.conv2(f1)
-        x1 = x1.mul(self.pool_sig_2d(f1))
-        v1 = self.v2(v1)
-        x1 = x1.mul(self.pool_sig_1d(v1).unsqueeze(-1))
+        pose = self.layer2(pose)
+        f1 = self.img3(f1)
+        pose = pose.mul(self.pool_sig_2d(f1))
+        v1 = self.vel3(v1)
+        pose = pose.mul(self.pool_sig_1d(v1).unsqueeze(-1))
 
-        x1 = self.gap(x1).squeeze(-1)
-        x1 = x1.squeeze(-1)
-        x1 = self.att(x1).mul(x1) + x1
-        x1 = self.drop(x1)
-        x1 = self.linear(x1)
+        pose = self.gap(pose).squeeze(-1)
+        pose = pose.squeeze(-1)
+        y = self.att(pose).mul(pose) + pose
+        y = self.drop(y)
+        y = self.linear(y)
 
-        return x1
+        return y
 
 def conv_init(conv):
     if conv.weight is not None:
