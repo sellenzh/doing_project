@@ -9,7 +9,7 @@ from entmax import entmax15
 
 
 class pedMondel(nn.Module):
-    def __init__(self, frames, vel=False, seg=False, h3d=True, nodes=19, n_clss=1):
+    def __init__(self, frames=True, vel=False, seg=False, h3d=True, nodes=19, n_clss=1):
         super(pedMondel, self).__init__()
         self.n_clss = n_clss
         self.ch = 4
