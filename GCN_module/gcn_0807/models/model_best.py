@@ -8,9 +8,9 @@ import torch.nn.functional as F
 from entmax import entmax15
 
 
-class pedMondel(nn.Module):
+class PedModel(nn.Module):
     def __init__(self, frames=True, vel=False, seg=False, h3d=True, nodes=19, n_clss=1):
-        super(pedMondel, self).__init__()
+        super(PedModel, self).__init__()
         self.n_clss = n_clss
         self.ch = 4
         self.ch1, self.ch2 = 32, 64
@@ -19,34 +19,36 @@ class pedMondel(nn.Module):
         bn_init(self.data_bn, 1)
         self.drop = nn.Dropout(0.25)
         A = np.stack([np.eye(nodes)] * 3, axis=0)
-
+        # ----------------------------------------------------------------------------------------------------
         self.img1 = nn.Sequential(
-                nn.Conv2d(self.ch, self.ch1, kernel_size=3, stride=1, padding=0, bias=False),
-                nn.BatchNorm2d(self.ch1), nn.SiLU())
+            nn.Conv2d(self.ch, self.ch1, kernel_size=3, stride=1, padding=0, bias=False),
+            nn.BatchNorm2d(self.ch1), nn.SiLU())
 
         self.vel1 = nn.Sequential(
-                nn.Conv1d(2, self.ch1, 3, bias=False), nn.BatchNorm1d(self.ch1), nn.SiLU())
+            nn.Conv1d(2, self.ch1, 3, bias=False), nn.BatchNorm1d(self.ch1), nn.SiLU())
         # ----------------------------------------------------------------------------------------------------
-        self.layer1 = TCN_GCN_unit(self.ch, self.ch1, A, residual=False)
+        self.layer1 = GCN_TAT_unit(self.ch, self.ch1, A, residual=False)
 
         self.img2 = nn.Sequential(
-                nn.Conv2d(self.ch1, self.ch1, kernel_size=3, stride=1, padding=0, bias=False),
-                nn.BatchNorm2d(self.ch1), nn.SiLU())
+            nn.Conv2d(self.ch1, self.ch1, kernel_size=3, stride=1, padding=0, bias=False),
+            nn.BatchNorm2d(self.ch1), nn.SiLU())
 
         self.vel2 = nn.Sequential(
-                nn.Conv1d(self.ch1, self.ch1, 3, bias=False),
-                nn.BatchNorm1d(self.ch1), nn.SiLU())
+            nn.Conv1d(self.ch1, self.ch1, 3, bias=False),
+            nn.BatchNorm1d(self.ch1), nn.SiLU())
         # ----------------------------------------------------------------------------------------------------
-        self.layer2 = TCN_GCN_unit(self.ch1, self.ch2, A)
+        
+        self.layer2 = GCN_TAT_unit(self.ch1, self.ch2, A)
 
         self.img3 = nn.Sequential(
-                nn.Conv2d(self.ch1, self.ch2, kernel_size=2, stride=1, padding=0, bias=False),
-                nn.BatchNorm2d(self.ch2), nn.SiLU())
+            nn.Conv2d(self.ch1, self.ch2, kernel_size=2, stride=1, padding=0, bias=False),
+            nn.BatchNorm2d(self.ch2), nn.SiLU())
+        #self.img_layers = ConvPoolImg()
 
         self.vel3 = nn.Sequential(
-                nn.Conv1d(self.ch1, self.ch2, kernel_size=2, bias=False),
-                nn.BatchNorm1d(self.ch2), nn.SiLU())
-
+            nn.Conv1d(self.ch1, self.ch2, kernel_size=2, bias=False),
+            nn.BatchNorm1d(self.ch2), nn.SiLU())
+        # ----------------------------------------------------------------------------------------------------
         self.gap = nn.AdaptiveAvgPool2d(1)
 
         self.att = nn.Sequential(
@@ -59,38 +61,35 @@ class pedMondel(nn.Module):
         self.linear = nn.Linear(self.ch2, self.n_clss)
         nn.init.normal_(self.linear.weight, 0, math.sqrt(2. / self.n_clss))
 
+        
+        # ----------------------------------------------------------------------------------------------------
         self.pool_sig_2d = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
             nn.Sigmoid()
         )
-        
+
         self.pool_sig_1d = nn.Sequential(
-                nn.AdaptiveAvgPool1d(1),
-                nn.Sigmoid()
-            )
+            nn.AdaptiveAvgPool1d(1),
+            nn.Sigmoid()
+        )
         # ----------------------------------------------------------------------------------------------------
 
     def forward(self, kp, frame=None, vel=None):
-
         N, C, T, V = kp.shape
         kp = kp.permute(0, 1, 3, 2).contiguous().view(N, C * V, T)
         kp = self.data_bn(kp)
         kp = kp.view(N, C, V, T).permute(0, 1, 3, 2).contiguous()  # [2, 4, T, 19]
 
-        f1 = self.img1(frame)  # [2, 32, 190, 62]
-        v1 = self.vel1(vel)  # [2, 32, T-2]
-
         pose = self.layer1(kp)
-        f1 = self.img2(f1)
-        pose.mul(self.pool_sig_2d(f1))
-        v1 = self.vel2(v1)
+
+        v1 = self.vel2(self.vel1(vel))
         pose = pose.mul(self.pool_sig_1d(v1).unsqueeze(-1))
 
         pose = self.layer2(pose)
-        f1 = self.img3(f1)
-        pose = pose.mul(self.pool_sig_2d(f1))
-        v1 = self.vel3(v1)
-        pose = pose.mul(self.pool_sig_1d(v1).unsqueeze(-1))
+        #_, f1 = self.img_layers(frame)
+        pose = pose.mul(self.pool_sig_2d(self.img3(self.img2(self.img1(frame)))))
+        v1 = self.pool_sig_1d(self.vel3(v1)).unsqueeze(-1)
+        pose = pose.mul(v1)
 
         pose = self.gap(pose).squeeze(-1)
         pose = pose.squeeze(-1)
@@ -100,15 +99,18 @@ class pedMondel(nn.Module):
 
         return y
 
+
 def conv_init(conv):
     if conv.weight is not None:
         nn.init.kaiming_normal_(conv.weight, mode='fan_out')
     if conv.bias is not None:
         nn.init.constant_(conv.bias, 0)
 
+
 def bn_init(bn, scale):
     nn.init.constant_(bn.weight, scale)
     nn.init.constant_(bn.bias, 0)
+
 
 class conv_residual(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=1, stride=1):
@@ -123,6 +125,7 @@ class conv_residual(nn.Module):
     def forward(self, x):
         y = self.conv(x)
         return self.bn(y)
+
 
 class decoupling_gcn(nn.Module):
     def __init__(self, in_channels, out_channels, A, adaptive) -> None:
@@ -199,6 +202,7 @@ class Embedding_module(nn.Module):
     def forward(self, x):
         return self.linear(x) / sqrt(self.out_ch)
 
+
 class Encoder(nn.Module):
     def __init__(self, inputs, heads, hidden, a_dropout=None, f_dropout=None):
         super(Encoder, self).__init__()
@@ -209,6 +213,7 @@ class Encoder(nn.Module):
     def forward(self, x, mask=None):
         x = self.layers(x, mask)
         return self.norm(x)
+
 
 class EncoderLayer(nn.Module):
     def __init__(self, inputs, heads, hidden, a_dropout=None, f_dropout=None):
@@ -254,6 +259,7 @@ class MultiHeadAttention(nn.Module):
         out = out.view(bs, -1, self.inputs)
         return self.dropout(self.output(out))
 
+
 class ScaledDotProductAttention(nn.Module):
 
     def __init__(self, dropout=None):
@@ -278,6 +284,7 @@ class Mish(nn.Module):
         x = x * (torch.tanh(F.softplus(x)))
         return x
 
+
 class FeedForwardNet(nn.Module):
     def __init__(self, inputs, hidden, dropout):
         super(FeedForwardNet, self).__init__()
@@ -292,9 +299,10 @@ class FeedForwardNet(nn.Module):
         x = self.downscale(x)
         return self.dropout(x)
 
-class TCN_GCN_unit(nn.Module):
+
+class GCN_TAT_unit(nn.Module):
     def __init__(self, in_channels, out_channels, A, stride=1, residual=True, adaptive=True):
-        super(TCN_GCN_unit, self).__init__()
+        super(GCN_TAT_unit, self).__init__()
         self.feature_dims = out_channels * 3
         self.num_heads = 8
         self.hidden_dims = out_channels * 6
@@ -314,7 +322,7 @@ class TCN_GCN_unit(nn.Module):
         elif in_channels == out_channels and stride == 1:
             self.residual = lambda x: x
         else:
-            #self.residual = lambda x: x
+            # self.residual = lambda x: x
             self.residual = conv_residual(in_channels, out_channels, kernel_size=1, stride=stride)
 
         self.linear = nn.Linear(self.feature_dims, out_channels)
@@ -324,7 +332,7 @@ class TCN_GCN_unit(nn.Module):
         res = self.residual(x)
         x = gcn + res
         B, C, T, V = x.size()
-        tcn = self.embed(x.permute(0, 3, 2, 1)).contiguous().view(B*V, T, -1)
+        tcn = self.embed(x.permute(0, 3, 2, 1)).contiguous().view(B * V, T, -1)
         for i in range(self.tat_times):
             memory = tcn
             tcn = self.tat[i](tcn)
@@ -332,62 +340,3 @@ class TCN_GCN_unit(nn.Module):
         y = self.linear(tcn).contiguous().view(B, -1, T, V)
         y = self.relu(y)
         return y
-
-class CrossTransformer(nn.Module):
-    def __init__(self, inputs):
-        super(CrossTransformer, self).__init__()
-        self.heads = 8
-        self.attention = MultiHeadAttention(self.heads, inputs)
-        self.mlp = nn.Sequential(
-            nn.Linear(1, inputs), nn.ReLU(),
-            nn.Linear(inputs, inputs), nn.ReLU(),
-            nn.Linear(inputs, 19), nn.ReLU()
-        )# k, v -> [..., 19, 32]
-
-    def forward(self, x, y):
-        #x=[B, C, T, V]
-        #y=[B, C, T]
-        B, C, T, V = x.size()
-        p = x.permute(0, 2, 3, 1).contiguous().view(B * T, V, -1) # x->[B*T, V, C]
-        y = y.permute(0, 2, 1)
-        y = y.contiguous().view(B * T, C)
-        y = y.unsqueeze(-2) # y->[B*T, 1, C]
-        q = self.mlp(y.transpose(-1, -2)).transpose(-1, -2)
-        y = y.repeat(1, V, 1) + q
-        z = self.attention(p, y, y).view(B, T, V, -1).permute(0, 3, 1, 2)
-        z += x
-        return z
-
-class FC(nn.Module):
-    def __init__(self, dims, activation=None, dropout=None):
-        super(FC, self).__init__()
-        self.hidden = dims * 3
-        self.layers = nn.Sequential(
-            nn.Linear(dims, self.hidden), nn.ReLU(),
-            nn.Linear(self.hidden, self.hidden), nn.ReLU(),
-            nn.Linear(self.hidden, dims), nn.ReLU()
-        )#way2
-        self.bn = nn.BatchNorm2d(dims)
-        self.act = activation if activation is not None else nn.ReLU()
-        self.dropout = nn.Dropout(p=dropout) if dropout is not None else nn.Identity()
-
-    def forward(self, x):
-        x = self.layers(x.permute(0, 2, 3, 1))
-        y = self.act(self.bn(x.permute(0, 3, 1, 2)))
-        y = self.dropout(y)
-        return y
-
-class GatedFusion(nn.Module):
-    def __init__(self, dims):
-        super(GatedFusion, self).__init__()
-        self.fc1 = FC(dims)
-        self.fc2 = FC(dims)
-        self.sig = nn.Sigmoid()
-
-    def forward(self, x, y):
-        z1 = self.fc1(x)
-        z2 = self.fc2(y)
-        #z = self.sig(torch.add(z1, z2))
-        z = 0
-        result = torch.add(x.mul(1 - z), y.mul(z))
-        return result
