@@ -1,42 +1,43 @@
-import inspect
 import torch
-import importlib
-import torch.nn.functional as F
-import torch.optim.lr_scheduler as lrs
-import pytorch_lightning as pl
+from torch import nn
 import numpy as np
 
-class MInterface(pl.LightningModule):
-    def __init__(self, model_name, loss, lr, **kwargs):
+
+class PedModel(nn.Module):
+    def __init__(self, n_clss=1):
         super().__init__()
-        self.save_hyper_parameters()
-        self.load_model()
-        self.configure_loss()
-        np.random.seed(42)
+        self.nodes = 19
+        self.n_clss = n_clss
+        self.ch, self.ch1, self.ch2 = 4, 32, 64
 
-        tr_num_samples = [9974, 5956, 7867]
-        te_num_samples = [9921, 5346, 3700]
-        val_num_samples = [3404, 1369, 1813]
-        self.tr_weight = torch.from_numpy(np.min(tr_num_samples) / tr_num_samples).float().cuda()
-        self.te_weight = torch.from_numpy(np.min(te_num_samples) / te_num_samples).float().cuda()
-        self.val_weight = torch.from_numpy(np.min(val_num_samples) / val_num_samples).float().cuda()
+        self.data_bn = nn.BatchNorm1d(self.ch * self.nodes)
+        bn_init(self.data_bn, 1)
+        self.drop = nn.Dropout(0.3)
+        A = np.stack([np.eye(self.nodes)] * 3, axis=0)
 
-    def forward(self, img):
-        return self.model(img)
+        self.img1 = nn.Sequential(
+            nn.Conv2d(self.ch, self.ch1, kernel_size=3, stride=1, padding=0, bias=False),
+            nn.BatchNorm2d(self.ch1), nn.SiLU()
+        )
+        self.vel1 = nn.Sequential(
+            nn.Conv1d(2, self.ch1, kernel_size=9, stride=1, padding=0, bias=False),
+            nn.BatchNorm1d(self.ch1), nn.SiLU()
+        )
 
-    def training_step(self, batch, batch_idx):
-        pose = batch[0]
-        y = batch[1]
-        frame = batch[2]
-        vel = batch[3]
 
-        if np.random.randint(10) >= 5:
-            crop_size = np.random.randint(2, 21)
-            pose = pose[:, :, -crop_size:]
 
-        out = self(pose, frame, vel)
-        w = self.tr_weight
-        
-        y_onehot = 
-        loss = F.binary_cross_entropy_with_logits(out, y_onehot, weight=w)
 
+    def forward(self, kp, frame, vel):
+
+
+
+
+def conv_init(conv):
+    if conv.weight is not None:
+        nn.init.kaiming_normal_(conv.weight, mode='fan_out')
+    if conv.bias is not None:
+        nn.init.constant_(conv.bias, 0)
+
+def bn_init(bn, scale):
+    nn.init.constant_(bn.weight, scale)
+    nn.init.constant_(bn.bias, 0)
