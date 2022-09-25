@@ -1,34 +1,34 @@
-import torch
 from torch import nn
-import numpy as np
+
+from . import common
 
 
 class PedModel(nn.Module):
-    def __init__(self, n_clss=1):
+    def __init__(self, args, n_clss=1):
         super().__init__()
-        self.nodes = 19
+        self.nodes = args.nodes
         self.n_clss = n_clss
         self.ch, self.ch1, self.ch2 = 4, 32, 64
 
-        self.data_bn = nn.BatchNorm1d(self.ch * self.nodes)
-        bn_init(self.data_bn, 1)
-        self.drop = nn.Dropout(0.3)
-        A = np.stack([np.eye(self.nodes)] * 3, axis=0)
+        self.data_bn = common.DataBN(self.ch, args)
 
-        self.img1 = nn.Sequential(
-            nn.Conv2d(self.ch, self.ch1, kernel_size=3, stride=1, padding=0, bias=False),
-            nn.BatchNorm2d(self.ch1), nn.SiLU()
-        )
-        self.vel1 = nn.Sequential(
-            nn.Conv1d(2, self.ch1, kernel_size=9, stride=1, padding=0, bias=False),
-            nn.BatchNorm1d(self.ch1), nn.SiLU()
-        )
+        self.img = common.ImgConvLayers(self.ch, self.ch1, self.ch2)
+        self.vel = common.VelConvLayers(self.ch, self.ch1, self.ch2)
 
-
-
+        self.layers = common.GCN_TAT_layers(self.ch, self.ch1, self.ch2, args)
+        #-----------------------------------------------------------
+        self.process = common.Process(self.ch2, self.n_clss)
 
     def forward(self, kp, frame, vel):
+        kp = self.data_bn(kp)
 
+        img = self.img(frame)
+        vel1, vel2 = self.vel(vel)
+
+        pose = self.layers(kp, img, vel1, vel2)
+
+        y = self.process(pose)
+        return y
 
 
 
