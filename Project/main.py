@@ -73,9 +73,14 @@ if __name__ == '__main__':
     parser.add_argument('--log_dir', default='./pie-train/', type=str)
     # Model Hyper_parameters
     parser.add_argument('--hid', default=64, type=int)
+    parser.add_argument('--head_num', default=8, type=int)
     parser.add_argument('--block_num', default=8, type=int)
     parser.add_argument('--in_channel', default=3, type=int)
     parser.add_argument('--layer_num', default=5, type=int)
+    parser.add_argument('--nodes', default=19, type=int)
+    parser.add_argument('--groups', default=8, type=int)
+    parser.add_argument('--dropout_rate', default=0.3, type=float)
+    #parser.add_argument('--time_attention_layers_num', default=5, type=int)
     # Other
     parser.add_argument('--aug_prob', default=0.5, type=float)
     # Add pytorch lightning's args to parser as a group.
