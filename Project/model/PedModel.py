@@ -351,10 +351,10 @@ class GCN_TAT_layers(nn.Module):
         self.cca_img2 = CCA(ch2)
         self.cca_vel2 = CCA(ch2)
 
-        self.fuse_img1 = Gated(ch, ch1)
-        self.fuse_vel1 = Gated(ch, ch1)
-        self.fuse_img2 = Gated(ch1, ch2)
-        self.fuse_vel2 = Gated(ch1, ch2)
+        self.fuse_img1 = Gated(ch1)
+        self.fuse_vel1 = Gated(ch1)
+        self.fuse_img2 = Gated(ch2)
+        self.fuse_vel2 = Gated(ch2)
 
         self.resize_img = ResizeImg(ch=4, ch1=ch1, ch2=ch2)
         self.resize_vel = ResizeVel(ch=2, ch1=ch1, ch2=ch2)
@@ -466,21 +466,20 @@ class VelConvLayers(nn.Module):
 
 
 class Gated(nn.Module):
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, dims):
         super(Gated, self).__init__()
-        self.in_ch = in_channels
-        self.out_ch = out_channels
+        self.dims = dims
         self.layer1 = nn.Sequential(
-            nn.Conv2d(self.in_ch, self.out_ch, kernel_size=1),
-            nn.BatchNorm2d(self.out_ch), nn.ReLU()
+            nn.Conv2d(self.dims, self.dims, kernel_size=1),
+            nn.BatchNorm2d(self.dims), nn.ReLU()
         )
         self.layer2 = nn.Sequential(
-            nn.Conv2d(self.in_ch, self.out_ch, kernel_size=1),
-            nn.BatchNorm2d(self.out_ch), nn.ReLU()
+            nn.Conv2d(self.dims, self.dims, kernel_size=1),
+            nn.BatchNorm2d(self.dims), nn.ReLU()
         )
         self.dropout = nn.Dropout(0.3)
         self.sig = nn.Sigmoid()
-        self.bn = nn.BatchNorm1d(self.out_ch)
+        self.bn = nn.BatchNorm2d(self.dims)
 
     def forward(self, x, y):
         z1 = self.layer1(x)
