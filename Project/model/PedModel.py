@@ -1,5 +1,4 @@
 import math
-from sklearn.feature_selection import chi2
 import torch
 from torch import nn
 import numpy as np
@@ -343,9 +342,6 @@ class GCN_TAT_layers(nn.Module):
         self.layer1 = GCN_TAT_unit(ch, ch1, A, residual=False)
         self.layer2 = GCN_TAT_unit(ch1, ch2, B)
 
-        #self.cross1 = CrossAtt(ch1)
-        #self.cross2 = CrossAtt(ch2)
-
         self.cca_img1 = CCA(ch1)
         self.cca_vel1 = CCA(ch1)
         self.cca_img2 = CCA(ch2)
@@ -484,8 +480,8 @@ class Gated(nn.Module):
     def forward(self, x, y):
         z1 = self.layer1(x)
         z2 = self.layer2(y)
-        #z = self.sig(torch.add(z1, z2))
-        z = 1
+        z = self.sig(torch.add(z1, z2))
+        #z = 1
         res = torch.add(torch.mul(x, z), torch.mul(y, 1 - z))
         return self.bn(res)
 
