@@ -6,7 +6,7 @@ from pathlib import Path
 import torch.utils.data as data
 from torchvision import transforms as A
 
-from tqdm import tqdm, trange
+from tqdm import tqdm
 from pie_data import PIE
 
 
