@@ -1,34 +1,36 @@
-import inspect
 import torch
-import importlib
 import torch.nn.functional as F
-import torch.optim.lr_scheduler as lrs
 import pytorch_lightning as pl
 from sklearn.metrics import balanced_accuracy_score
 import numpy as np
 
+from standard_net import PedModel
+
 class MInterface(pl.LightningModule):
-    def __init__(self, model_name, len, args, **kwargs):
+    def __init__(self, len, args, **kwargs):
         super().__init__()
         self.lr = args.lr
         self.weight_decay = args.weight_decay
         self.total_steps = len * args.epochs
         self.model_name = args.model_name
 
-        self.save_hyper_parameters()
-        self.load_model()
+        #self.save_hyper_parameters()
+        #self.load_model()
         #self.configure_loss()
         np.random.seed(42)
 
         tr_num_samples = [9974, 5956, 7867]
         te_num_samples = [9921, 5346, 3700]
         val_num_samples = [3404, 1369, 1813]
+
         self.tr_weight = torch.from_numpy(np.min(tr_num_samples) / tr_num_samples).float().cuda()
         self.te_weight = torch.from_numpy(np.min(te_num_samples) / te_num_samples).float().cuda()
         self.val_weight = torch.from_numpy(np.min(val_num_samples) / val_num_samples).float().cuda()
 
-    def forward(self, img):
-        return self.model(img)
+        self.model = PedModel(args, n_clss=3)
+
+    def forward(self, kp, img, vel):
+        return self.model(kp, img, vel)
 
     def training_step(self, batch, batch_idx):
         pose = batch[0]
@@ -101,7 +103,7 @@ class MInterface(pl.LightningModule):
                         'interval': 'step', 'frequency': 1, }
         return [optim], [lr_scheduler]
 
-    def load_model(self):
+    '''def load_model(self):
         name = self.model_name
         camel_name = ''.join([i.capitalize() for i in name.split('_')])
         try:
@@ -121,5 +123,5 @@ class MInterface(pl.LightningModule):
             if arg in in_keys:
                 args1[arg] = getattr(self.hparams, arg)
         args1.update(other_args)
-        return model(**args1)
+        return model(**args1)'''
 

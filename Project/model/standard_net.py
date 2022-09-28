@@ -6,7 +6,6 @@ from . import common
 class PedModel(nn.Module):
     def __init__(self, args, n_clss=1):
         super().__init__()
-        self.nodes = args.nodes
         self.n_clss = n_clss
         self.ch, self.ch1, self.ch2 = 4, 32, 64
 
@@ -19,13 +18,13 @@ class PedModel(nn.Module):
         #-----------------------------------------------------------
         self.process = common.Process(self.ch2, self.n_clss)
 
-    def forward(self, kp, frame, vel):
+    def forward(self, kp, frame, velocity):
         kp = self.data_bn(kp)
 
         img = self.img(frame)
-        vel1, vel2 = self.vel(vel)
+        vel1, vel2 = self.vel(velocity)
 
-        pose = self.layers(kp, img, vel1, vel2)
+        pose = self.layers(kp, img, vel1, vel2, frame, velocity)
 
         y = self.process(pose)
         return y
@@ -41,3 +40,5 @@ def conv_init(conv):
 def bn_init(bn, scale):
     nn.init.constant_(bn.weight, scale)
     nn.init.constant_(bn.bias, 0)
+
+

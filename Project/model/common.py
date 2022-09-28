@@ -137,8 +137,22 @@ class Process(nn.Module):
 class GCN_TAT_layers(nn.Module):
     def __init__(self, ch, ch1, ch2, args):
         super(GCN_TAT_layers, self).__init__()
+
         self.layer1 = GCN_TAT_unit(ch, ch1, args, residual=False)
         self.layer2 = GCN_TAT_unit(ch1, ch2, args)
+
+        self.cca_img1 = CCA(ch1)
+        self.cca_vel1 = CCA(ch1)
+        self.cca_img2 = CCA(ch2)
+        self.cca_vel2 = CCA(ch2)
+
+        self.fuse_img1 = Gated(ch1)
+        self.fuse_vel1 = Gated(ch1)
+        self.fuse_img2 = Gated(ch2)
+        self.fuse_vel2 = Gated(ch2)
+
+        self.resize_img = ResizeImg(ch=4, ch1=ch1, ch2=ch2)
+        self.resize_vel = ResizeVel(ch=2, ch1=ch1, ch2=ch2)
 
         self.pool_sig_1d = nn.Sequential(
             nn.AdaptiveAvgPool1d(1),
@@ -149,13 +163,32 @@ class GCN_TAT_layers(nn.Module):
             nn.Sigmoid()
         )
 
-    def forward(self, pose, img, vel1, vel2):
-        y = self.layer1(pose)
-        y = y.mul(self.pool_sig_1d(vel1).unsqueeze(-1))
-        y = self.layer2(y)
+    def forward(self, pose, img, vel1, vel2, frame, velocity):
+        """
+        pose input size = [16, 32/64, Time_crop, 19]
+        img input size = [16, 64, 1, 1]
+        vel1 input size = [16, 32, 1]
+        vel2 input size = [16, 64, 1]
+        frame input size = [16, 4, 192, 64]
+        velocity input size = [16, 2, 62]
+        """
+        _, _, T, _ = pose.size()
+        frame1, frame2 = self.resize_img(frame, T)
+        velocity1, velocity2 = self.resize_vel(velocity, T)
+
+        pose = self.layer1(pose)
+        y = pose.mul(self.pool_sig_1d(vel1).unsqueeze(-1))
+
+        pose = self.fuse_img1(y, self.cca_img1(y, frame1))
+        pose = self.fuse_vel1(pose, self.cca_vel1(pose, velocity1))
+
+        y = self.layer2(pose)
         y = y.mul(self.pool_sig_2d(img))
         y = y.mul(self.pool_sig_1d(vel2).unsqueeze(-1))
-        return y
+
+        pose = self.fuse_img2(y, self.cca_img2(y, frame2))
+        pose = self.fuse_vel2(pose, self.cca_vel2(pose, velocity2))
+        return pose
 
 
 class GCN_TAT_unit(nn.Module):
@@ -230,12 +263,9 @@ class DecouplingGCN(nn.Module):
         self.subnet = self.A.shape[0]
 
         self.linear = nn.Linear(self.in_ch, self.out_ch)
-        if self.adaptive:
-            self.DecoupleA = nn.Parameter(torch.tensor(
+        self.DecoupleA = nn.Parameter(torch.tensor(
                 np.reshape(self.A.astype(np.float32), [3, 1, 19, 19]), dtype=torch.float32,
                 requires_grad=True).repeat(1, self.groups, 1, 1), requires_grad=True)
-        else:
-            self.DecoupleA = torch.autograd.Variable(torch.from_numpy(self.A.astype(np.float32)), requires_grad=False)
 
         if self.in_ch != self.out_ch:
             self.down = nn.Sequential(
@@ -271,14 +301,10 @@ class DecouplingGCN(nn.Module):
         return A
 
     def forward(self, x):
-
-        if self.adaptive:
-            learn_A = self.DecoupleA.repeat(1, self.out_ch // self.groups, 1, 1)
-            norm_learn_A = torch.cat([self.L2_norm(learn_A[0:1, ...]),
+        learn_A = self.DecoupleA.repeat(1, self.out_ch // self.groups, 1, 1)
+        norm_learn_A = torch.cat([self.L2_norm(learn_A[0:1, ...]),
                                       self.L2_norm(learn_A[1:2, ...]),
                                       self.L2_norm(learn_A[2:3, ...])], 0)
-        else:
-            norm_learn_A = self.DecoupleA.cuda(x.get_device()).unsqueeze(1)
 
         y = torch.einsum('nctv,cd->ndtv', (x, self.Linear_weight)).contiguous()
         y += self.Linear_bias
@@ -287,6 +313,8 @@ class DecouplingGCN(nn.Module):
         n, kc, t, v = y.size()
         y = y.view(n, self.subnet, kc // self.subnet, t, v)
         y = torch.einsum('nkctv,kcvw->nctw', (y, norm_learn_A))
+
+
         y = self.bn1(y)
         y += self.down(x)
         return self.relu(y)
@@ -399,3 +427,165 @@ class Mish(nn.Module):
 
     def forward(self, x):
         return x * (torch.tanh(F.softplus(x)))
+
+class Gated(nn.Module):
+    def __init__(self, dims):
+        super(Gated, self).__init__()
+        self.dims = dims
+
+        self.layer1 = nn.Sequential(
+            nn.Conv2d(self.dims, self.dims, kernel_size=1),
+            nn.BatchNorm2d(self.dims), nn.ReLU()
+        )
+        self.layer2 = nn.Sequential(
+            nn.Conv2d(self.dims, self.dims, kernel_size=1),
+            nn.BatchNorm2d(self.dims), nn.ReLU()
+        )
+        self.dropout = nn.Dropout(0.3)
+        self.sig = nn.Sigmoid()
+        self.bn = nn.BatchNorm2d(self.dims)
+
+    def forward(self, x, y):
+        z1 = self.layer1(x)
+        z2 = self.layer2(y)
+        z = self.sig(torch.add(z1, z2))
+        #z = 1
+        res = torch.add(torch.mul(x, z), torch.mul(y, 1 - z))
+        return self.bn(res)
+
+
+def Flatten(x):
+    return x.view(x.size(0), -1)
+
+
+class CCA(nn.Module):
+    def __init__(self, dims):
+        super(CCA, self).__init__()
+        self.mlp = nn.Linear(dims, dims, bias=False)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x, y):
+        avg_pool_x = F.avg_pool2d(x, (x.size(2), x.size(3)))
+        channel_att_x = self.mlp(Flatten(avg_pool_x))
+        scale = torch.sigmoid(channel_att_x).unsqueeze(2).unsqueeze(3).expand_as(x)
+        x_after_channel = x * scale
+        y = torch.mul(y, self.relu(x_after_channel))
+        return y
+
+class CrossAtt(nn.Module):
+    def __init__(self, dims, args):
+        super(CrossAtt, self).__init__()
+        self.dims = dims
+        self.layer_num = args.layer_num
+        self.head = args.head_num
+        self.rate = args.dropout_rate
+
+        self.attention = nn.ModuleList()
+        self.norm = nn.ModuleList()
+        for _ in range(self.layer_num):
+            self.attention.append(CrossLayers(self.dims, self.head, self.dims * 3, self.rate))
+            self.norm.append(nn.LayerNorm(self.dims))
+
+    def forward(self, pose, vel, img=None):
+        """
+        vel input size = [16, 32/64, time_crop]
+        img input size = [16, 32/64, time_crop, 19]
+
+        vel -> linear resize to: [16, 32/64, time_crop, 1 -> 19]
+        """
+        if img is not None:
+            poseimg = pose
+            for i in range(self.layer_num):
+                memory = poseimg
+                poseimg = self.attention[i](poseimg, img)
+                poseimg = self.norm[i](poseimg)
+                poseimg = poseimg + memory
+            img = poseimg
+
+        for i in range(self.layer_num):
+            memory = pose
+            pose = self.attention[i](pose, vel)
+            pose = self.norm[i](pose)
+            pose = pose + memory
+
+        return pose, img
+
+
+class CrossLayers(nn.Module):
+    def __init__(self, inputs, heads, hidden, dropout_rate):
+        super(CrossLayers, self).__init__()
+        self.rate = dropout_rate
+
+        self.attention = MultiHeadAttention(heads, inputs, rate=self.rate)
+        self.attention_norm = nn.LayerNorm(inputs)
+        self.feedforward = FeedForwardNet(inputs, hidden, rate=self.rate)
+        self.feedforward_norm = nn.LayerNorm(inputs)
+
+    def forward(self, x1, x2, mask=None):
+        y = self.attention(x1, x2, x2, mask=mask)
+        y = self.attention_norm(y)
+        x1 = x1 + y
+        y = self.feedforward_norm(x1)
+        y = self.feedforward(y)
+        x1 = x1 + y
+        return x1
+
+
+class LinearResize(nn.Sequential):
+    def __init__(self, in_ch, out_ch):
+        unit = []
+        unit.append(nn.Linear(in_ch, out_ch * 3, bias=False))
+        unit.append(nn.LayerNorm(out_ch * 3))
+        unit.append(nn.Linear(out_ch * 3, out_ch * 3, bias=False))
+        unit.append(nn.LayerNorm(out_ch * 3))
+        unit.append(nn.Linear(out_ch * 3, out_ch, bias=False))
+        unit.append(nn.LayerNorm(out_ch))
+        super(LinearResize, self).__init__(*unit)
+
+
+class ResizeImg(nn.Module):
+    def __init__(self, ch, ch1, ch2):
+        super(ResizeImg, self).__init__()
+        self.layer1 = nn.Sequential(
+            nn.Conv2d(ch, ch1, kernel_size=1),
+            nn.BatchNorm2d(ch1), nn.ReLU()
+        )
+        self.layer2 = nn.Sequential(
+            nn.Conv2d(ch1, ch2, kernel_size=1),
+            nn.BatchNorm2d(ch2), nn.ReLU()
+        )
+
+        self.resize1 = LinearResize(in_ch=192, out_ch=62)
+        self.resize2 = LinearResize(in_ch=64, out_ch=19)
+
+    def forward(self, img, T):
+        img = self.resize2(self.resize1(img.transpose(-1, -2)).transpose(-1, -2))
+        img = img[:, :, -T:, :]
+
+        y1 = self.layer1(img)
+        y2 = self.layer2(y1)
+
+        return y1, y2
+
+
+class ResizeVel(nn.Module):
+    def __init__(self, ch, ch1, ch2):
+        super(ResizeVel, self).__init__()
+        self.layer1 = nn.Sequential(
+            nn.Conv2d(ch, ch1, kernel_size=1),
+            nn.BatchNorm2d(ch1), nn.ReLU()
+        )
+        self.layer2 = nn.Sequential(
+            nn.Conv2d(ch1, ch2, kernel_size=1),
+            nn.BatchNorm2d(ch2), nn.ReLU()
+        )
+        self.resize = LinearResize(in_ch=1, out_ch=19)
+
+    def forward(self, vel, T):
+        vel = self.resize(vel.unsqueeze(-1))
+        vel = vel[:, :, -T:, :]
+
+        v1 = self.layer1(vel)
+        v2 = self.layer2(v1)
+
+        return v1, v2
