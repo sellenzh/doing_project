@@ -11,11 +11,11 @@ from pie_data import PIE
 
 
 class DataSet(data.Dataset):
-    def __init__(self, path, pie_path, data_set):
+    def __init__(self, path, pie_path, data_set, balance=False, bh='all'):
         super().__init__()
         np.random.seed(42)
-
-        self.data_set = data_set
+        self.balance = balance
+        self.bn = bh
         self.maxw_var = 9
         self.maxh_var = 6
         self.maxd_var = 2
@@ -25,7 +25,7 @@ class DataSet(data.Dataset):
         self.data_list = [data_name for data_name in os.listdir(self.data_path)]
         self.pie_path = pie_path
 
-        imdb = PIE(data_path=self.data_path)
+        imdb = PIE(data_path=self.pie_path)
         params = {'data_split_type': 'default'}
         self.vid_ids, _ = imdb._get_data_ids(data_set, params)
 
@@ -70,7 +70,12 @@ class DataSet(data.Dataset):
         kp[..., 2] /= 80
         kp = torch.from_numpy(kp.transpose(2, 0, 1)).float().contiguous()
 
-        return kp
+        if ped_data['irr']:
+            bh = torch.from_numpy(np.ones(1).reshape([1])) * 2
+        else:
+            bh = torch.from_numpy(ped_data['crossing'].reshape([1])).float()
+
+        return kp, bh
 
 
 def main():
@@ -83,7 +88,7 @@ def main():
             A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
 
-    tr_data = DataSet(path=data_path, pie_path=pie_path, data_set='train')
+    tr_data = DataSet(path=data_path, pie_path=pie_path, data_set='train', balance=False, bh='all')
     iter_ = trange(len(tr_data))
     cx = np.zeros([len(tr_data), 3])
     fs = np.zeros([len(tr_data), 192, 64])
