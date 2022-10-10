@@ -178,7 +178,3 @@ vel = torch.randn(size=(32, 16, 2))
 
 y = model(bbox, vel)
 print(y.shape)'''
-
-
-
-
