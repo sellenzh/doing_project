@@ -1,51 +1,35 @@
-import math
-
-import torch.cuda
-from torch import nn
+import torch
 import numpy as np
+from torch import nn
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
+#Positional encoding
 
-# POSITIONAL ENCODING
-def get_angles(pos, i, d_model):
+def get_angles(position, i, d_model):
     angle_rates = 1 / np.power(10000, (2 * (i // 2)) / np.float32(d_model))
-    return pos * angle_rates
-
+    return position * angle_rates
 
 def positional_encoding(position, d_model):
     angle_rads = get_angles(np.arange(position)[:, np.newaxis],
                             np.arange(d_model)[np.newaxis, :],
                             d_model)
-
-    # apply sin to even indices in the array; 2i
+    #apply sin to even indices in the array ; 2i
     angle_rads[:, 0::2] = np.sin(angle_rads[:, 0::2])
-
-    # apply cos to odd indices in the array; 2i+1
+    #apply cos to odd indices in the array : 2i + 1
     angle_rads[:, 1::2] = np.cos(angle_rads[:, 1::2])
 
     pos_encoding = angle_rads[np.newaxis, ...]
+    return torch.tensor(pos_encoding, dtype=torch.float32).to(device)
 
-    return torch.tensor(pos_encoding, dtype=torch.float32).to(device)  # Torch Tensor float 32
-
-
-class FFN(nn.Module):
-    def __init__(self, d_model, hidden_dim):
-        super().__init__()
-        self.k1convL1 = nn.Linear(d_model, hidden_dim)
-        self.k1convL2 = nn.Linear(hidden_dim, d_model)
-        self.activation = nn.ReLU()
-
-    def forward(self, x):
-        x = self.k1convL1(x)
-        x = self.activation(x)
-        x = self.k1convL2(x)
-        return x
+def create_look_ahead_mask(size):
+    mask = torch.triu(torch.ones((size, size), dtype=torch.float32), diagonal=1)
+    return mask
 
 
 class MultiHeadAttention(nn.Module):
     def __init__(self, d_model, num_heads, d_input=None):
-        super().__init__()
+        super(MultiHeadAttention, self).__init__()
 
         self.num_heads = num_heads
         self.d_model = d_model
@@ -56,146 +40,145 @@ class MultiHeadAttention(nn.Module):
             d_input = d_model
 
         self.depth = d_model // self.num_heads
-
-        self.wq = nn.Linear(d_input, d_model, bias=False)
-        self.wk = nn.Linear(d_input, d_model, bias=False)
-        self.wv = nn.Linear(d_input, d_model, bias=False)
+        self.q_w = nn.Linear(d_input, d_model, bias=False)
+        self.k_w = nn.Linear(d_input, d_model, bias=False)
+        self.v_w = nn.Linear(d_input, d_model, bias=False)
 
         self.dense = nn.Linear(d_model, d_model)
 
-    def scaled_dot_product_attention(self, q, k, v, mask):
-
-        matmul_qk = torch.matmul(q, k.transpose(-2, -1))  # (..., seq_len_q, seq_len_k)
-
-        # scale matmul_qk
-
-        scaled_attention_logits = matmul_qk / np.sqrt(self.depth)
-
-        # add the mask to the scaled tensor.
-        if mask is not None:
-            # (..., 1, 1, seq_len)
-            scaled_attention_logits += (mask * -1e9)
-
-            # softmax is normalized on the last axis (seq_len_k) so that the scores
-        # add up to 1.
-        attention_weights = nn.Softmax(dim=-1)(scaled_attention_logits)  # (..., seq_len_q, seq_len_k)
-
-        output = torch.matmul(attention_weights, v)  # (..., seq_len_q, depth_v)
-
-        return output, attention_weights
+    def scaled_dot_product_attention(self, q, k, v):
+        matmul_qk = torch.matmul(q, k.transpose(-1, -2))
+        scaled_attention_logit = matmul_qk / np.sqrt(self.depth)
+        attention_weights = nn.Softmax(dim=-1)(scaled_attention_logit)
+        return torch.matmul(attention_weights, v)
 
     def split_heads(self, x, batch_size):
-        """Split the last dimension into (num_heads, depth).
-        Transpose the result such that the shape is (batch_size, num_heads, seq_len, depth)
-        """
-
         return x.view(batch_size, -1, self.num_heads, self.depth).transpose(1, 2)
 
-    def forward(self, q, k, v, mask):
-
+    def forward(self, q, k, v):
         batch_size = q.shape[0]
 
-        q = self.wq(q)  # (batch_size, seq_len, d_model)
-        k = self.wk(k)  # (batch_size, seq_len, d_model)
-        v = self.wv(v)  # (batch_size, seq_len, d_model)
+        q = self.split_heads(self.q_w(q), batch_size)  # (batch_size, num_heads, seq_len_q, depth) --- F
+        k = self.split_heads(self.k_w(k), batch_size)  # (batch_size, num_heads, seq_len_k, depth)
+        v = self.split_heads(self.v_w(v), batch_size)  # (batch_size, num_heads, seq_len_v, depth)
 
-        q = self.split_heads(q, batch_size)  # (batch_size, num_heads, seq_len_q, depth) --- F
-        k = self.split_heads(k, batch_size)  # (batch_size, num_heads, seq_len_k, depth)
-        v = self.split_heads(v, batch_size)  # (batch_size, num_heads, seq_len_v, depth)
-
-        # scaled_attention.shape == (batch_size, num_heads, seq_len_q, depth)
-        # attention_weights.shape == (batch_size, num_heads, seq_len_q, seq_len_k)
-        scaled_attention, attention_weights = self.scaled_dot_product_attention(
-            q, k, v, mask)
-
+        scaled_attention = self.scaled_dot_product_attention(q, k, v)
         concat_attention = scaled_attention.transpose(1, 2).contiguous().view(batch_size, -1, self.d_model)
+        return self.dense(concat_attention)
 
-        output = self.dense(concat_attention)  # (batch_size, seq_len_q, d_model)
 
-        return output, attention_weights
+class FFN(nn.Module):
+    def __init__(self, d_model, hidden_dim):
+        super(FFN, self).__init__()
+        self.layer1 = nn.Linear(d_model, hidden_dim)
+        self.layer2 = nn.Linear(hidden_dim, d_model)
+        self.activation = nn.ReLU()
+
+    def forward(self, x):
+        y = self.layer1(x)
+        y = self.activation(self.layer2(y))
+        return y
 
 
 class EncoderLayer(nn.Module):
     def __init__(self, d_model, num_heads, dff, rate, d_input=None):
-        super().__init__()
+        super(EncoderLayer, self).__init__()
 
         self.mha = MultiHeadAttention(d_model, num_heads, d_input)
         self.ffn = FFN(d_model, dff)
 
-        self.layer_norm1 = nn.LayerNorm(normalized_shape=d_model, eps=1e-6)
-        self.layer_norm2 = nn.LayerNorm(normalized_shape=d_model, eps=1e-6)
+        self.layer1norm = nn.LayerNorm(normalized_shape=d_model, eps=1e-6)
+        self.layer2norm = nn.LayerNorm(normalized_shape=d_model, eps=1e-6)
 
         self.dropout1 = nn.Dropout(rate)
         self.dropout2 = nn.Dropout(rate)
 
-    def forward(self, x):
-        # Multi-head attention
-        attn_output, _ = self.mha(x, x, x)  # (batch_size, input_seq_len, d_model)
-        attn_output = self.dropout1(attn_output)
-        # Layer norm after adding the residual connection
-        out1 = self.layer_norm1(x + attn_output)  # (batch_size, input_seq_len, d_model)
+    def forward(self, x, y=None):
+        y = x if y is None else y
+        att_output = self.mha(x, y, y)
+        att_output = self.dropout1(att_output)
+        out1 = self.layer1norm(y + att_output)
 
-        # Feed forward
-        fnn_output = self.ffn(out1)  # (batch_size, input_seq_len, d_model)
-        fnn_output = self.dropout2(fnn_output)
-        # Second layer norm after adding residual connection
-        out2 = self.layer_norm2(out1 + fnn_output)  # (batch_size, input_seq_len, d_model)
-
-        return out2
+        ffn_output = self.ffn(out1)
+        ffn_output = self.dropout2(ffn_output)
+        out = self.layer2norm(out1 + ffn_output)
+        return out
 
 
 class Encoder(nn.Module):
-    def __init__(self, num_layers, d_model, d_input, num_heads, dff, maximum_position_encoding, rate=0.1):
-        super().__init__()
+    def __init__(self, num_layers, d_model, bbox_input, speed_input, num_heads, dff, maximum_position_encoding, rate=0.1):
+        super(Encoder, self).__init__()
 
         self.d_model = d_model
         self.num_layers = num_layers
+        self.embedding_bbox = nn.Linear(bbox_input, d_model)
+        self.embedding_vel = nn.Linear(speed_input, d_model)
 
-        self.embedding = nn.Linear(d_input, d_model)
 
         self.enc_layers = nn.ModuleList()
-        for _ in range(num_layers):
+        self.vel_layers = nn.ModuleList()
+        self.cross_bbox2vel = nn.ModuleList()
+        self.cross_vel2bbox = nn.ModuleList()
+        for _ in range(self.num_layers):
             self.enc_layers.append(EncoderLayer(d_model, num_heads, dff, rate))
+            self.vel_layers.append(EncoderLayer(d_model, num_heads, dff, rate))
+            self.cross_bbox2vel.append(EncoderLayer(d_model, num_heads, dff, rate))
+            self.cross_vel2bbox.append(EncoderLayer(d_model, num_heads, dff, rate))
 
-        self.pos_encoding = positional_encoding(maximum_position_encoding,
-                                                self.d_model)
+        self.pos_encoding = positional_encoding(maximum_position_encoding, self.d_model)
+        self.pos_encoding_vel = positional_encoding(maximum_position_encoding, self.d_model)
 
-    def forward(self, x):
 
+    def forward(self, x, vel):
         seq_len = x.shape[-2]
-        x = self.embedding(x)  # Transform to (batch_size, input_seq_length, d_model)
+
+        x = self.embedding_bbox(x)
+        vel = self.embedding_vel(vel)
 
         x += self.pos_encoding[:, :seq_len, :]
+        vel += self.pos_encoding_vel[:, :seq_len, :]
 
         for i in range(self.num_layers):
             x = self.enc_layers[i](x)
+            vel = self.vel_layers[i](vel)
+            bbox2vel = self.cross_bbox2vel[i](x, vel)
+            vel2bbox = self.cross_vel2bbox[i](vel, x)
+            x, vel = vel2bbox, bbox2vel
 
-        return x  # (batch_size, input_seq_len, d_model)
+        return x, vel#[batch_size, seq_len, d_model]
 
 
 class Model(nn.Module):
-    def __init__(self, num_layers, d_model, d_input, num_heads, dff, maximum_position_encoding, rate=0.1):
+    def __init__(self, num_layers, d_model, bbox_input, speed_input, num_heads, dff, maximum_position_encoding, rate=0.1):
         super(Model, self).__init__()
 
-        self.encoder = Encoder(num_layers, d_model, d_input, num_heads, dff,
-                               maximum_position_encoding, rate)
-        self.gap = nn.AdaptiveAvgPool2d(1)
-        self.att = nn.Sequential(
-            nn.ReLU(),
-            nn.Linear(self.out_ch, self.out_ch),
-            nn.BatchNorm1d(self.out_ch),
-            nn.Sigmoid()
-        )
-        self.linear = nn.Linear(self.out_ch, self.n_clss)
-        nn.init.normal_(self.linear.weight, 0, math.sqrt(2. / self.n_clss))
+        self.encoder = Encoder(num_layers, d_model, bbox_input, speed_input, num_heads, dff, maximum_position_encoding, rate)
 
-        self.dropout = nn.Dropout(rate)
+        self.resize = nn.Linear(d_model * 2, d_model)
 
-    def forward(self, kp):
-        y = self.encoder(kp)
-        y = torch.mean(y, dim=1)
-        y = self.gap(y).squeeze(-1)
-        y = y.squeeze(-1)
-        y = self.att(y).mul(y) + y
-        y = self.linear(self.dropout(y))
-        return y
+        self.linear = nn.Linear(d_model, 4)
+        self.act1 = nn.ReLU()
+        self.dense = nn.Linear(4, 1)
+        self.activation = nn.ReLU()
+
+    def forward(self, x, vel):
+        x, vel = self.encoder(x, vel)
+        y = torch.cat((x, vel), dim=-1)
+        y = torch.mean(self.resize(y), dim=1)
+
+        y = self.act1(self.linear(y))
+        return self.activation(self.dense(y))
+
+
+
+'''model = Model(num_layers=4, d_model=128, bbox_input=4, speed_input=2, num_heads=8, dff=256, maximum_position_encoding=16)
+
+bbox = torch.randn(size=(32, 16, 4))
+vel = torch.randn(size=(32, 16, 2))
+
+y = model(bbox, vel)
+print(y.shape)'''
+
+
+
+
