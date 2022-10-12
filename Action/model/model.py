@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 from torch import nn
+import torch.nn.functional as F
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -131,7 +132,6 @@ class Encoder(nn.Module):
 
     def forward(self, x, vel):
         seq_len = x.shape[-2]
-
         x = self.embedding_bbox(x)
         vel = self.embedding_vel(vel)
 
@@ -159,16 +159,48 @@ class Model(nn.Module):
         self.linear = nn.Linear(d_model, 4)
         self.act1 = nn.ReLU()
         self.dense = nn.Linear(4, 1)
-        self.activation = nn.ReLU()
+        self.activation = nn.Sigmoid()
 
-    def forward(self, x, vel):
+    def forward(self, data):
+        x = data[:, :, :-2]
+        
+        vel = data[:, :, -2:]
         x, vel = self.encoder(x, vel)
-        y = torch.cat((x, vel), dim=-1)
+        y = torch.cat((x, vel), dim=-1)# [32, 16, 256]
         y = torch.mean(self.resize(y), dim=1)
 
         y = self.act1(self.linear(y))
         return self.activation(self.dense(y))
 
+
+
+class Test(nn.Module):
+    def __init__(self, mid_dim):
+        super(Test, self).__init__()
+
+        self.linear1 = nn.Linear(mid_dim, mid_dim, bias=False)
+        self.linear2 = nn.Linear(mid_dim, 1, bias=False)
+
+
+    def forward(self, x):
+        # x: [1,8,N,256]
+
+        x = x.contiguous()#[32, 16, 256]
+        shape = x.shape
+
+        f = x.view(1, shape[2], -1)# [1, 256, 512]
+        out1 = self.linear1(f)
+        act1 = torch.tanh(out1)
+        out2 = self.linear2(act1)
+        beta = F.softmax(out2, dim=1)
+
+        #beta = F.softmax(self.linear2(torch.tanh(self.linear1(f))), dim=1)  # [1,N,1]
+
+        c = beta * f
+        c = c.squeeze()
+        print(c.shape)
+        return c
+    
 
 
 '''model = Model(num_layers=4, d_model=128, bbox_input=4, speed_input=2, num_heads=8, dff=256, maximum_position_encoding=16)
@@ -178,3 +210,8 @@ vel = torch.randn(size=(32, 16, 2))
 
 y = model(bbox, vel)
 print(y.shape)'''
+
+'''model2 = Test(256)
+tensor = torch.randn(size=(32, 16, 256))
+res = model2(tensor)
+res.shape'''
