@@ -25,12 +25,11 @@ def train(model, train_loader, valid_loader, criterion, optimizer, checkpoint_fi
         model.train()
         losses = 0.0
 
-        for x, vel, y in train_loader:
+        for x, y in train_loader:
             x = x.to(device)
-            vel = vel.to(device)
             y = y.reshape(-1, 1).to(device)
 
-            out = model(x, vel)  # ①
+            out = model(x)  # ①
 
             loss = criterion(out, y)  # ②
 
@@ -84,12 +83,11 @@ def evaluate(model, data_loader, criterion):
     with torch.no_grad():
         model.eval()
         acc = 0
-        for x, vel, y in data_loader:
+        for x, y in data_loader:
             x = x.to(device)
-            vel = vel.to(device)
             y = y.reshape(-1, 1).to(device)
 
-            out = model(x, vel)
+            out = model(x)
             val_loss = criterion(out, y)
             val_losses += val_loss.item()
 
@@ -103,12 +101,11 @@ def test(model, data_loader):
     with torch.no_grad():
         model.eval()
         step = 0
-        for x, vel, y in data_loader:
+        for x, y in data_loader:
             x = x.to(device)
-            vel = vel.to(device)
             y = y.reshape(-1, 1).to(device)
 
-            out = model(x, vel)
+            out = model(x)
             if (step == 0):
                 pred = out
                 labels = y
