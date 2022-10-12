@@ -14,7 +14,7 @@ seed_all(seed)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-PIE_PATH = './PIE_dataset'
+PIE_PATH = './PIE'
 data_opts = {
     'fstride': 1,
     'sample_type': 'all',
@@ -55,7 +55,9 @@ bbox_test = tte_seq_test['bbox']
 
 action_test = tte_seq_test['activities']
 
-vel_test = torch.cat((tte_seq_test['obd_speed'], tte_seq_test['gps_speed']), dim=-1)
+vel_test_obd = torch.Tensor(np.array(tte_seq_test['obd_speed']))
+vel_test_gps = torch.Tensor(np.array(tte_seq_test['gps_speed']))
+vel_test = torch.cat((vel_test_obd, vel_test_gps), dim=-1)
 
 normalized_bbox_test = normalize_bbox(bbox_test)
 
@@ -63,10 +65,12 @@ label_action_test = prepare_label(action_test)
 
 X_test = torch.Tensor(normalized_bbox_test)
 Y_test = torch.Tensor(label_action_test)
+X_test = torch.cat((X_test, vel_test), dim=-1)
 
-test_set = TensorDataset(X_test, vel_test, Y_test)
 
-test_loader = DataLoader(test_set, batch_size=256)
+test_set = TensorDataset(X_test, Y_test)
+
+test_loader = DataLoader(test_set, batch_size=128)
 
 
 print("Start Testing \n")
@@ -110,5 +114,3 @@ f.write(config)
 f.close()
 
 print(f"Accuracy: {acc} \n AUC: {auc} \n f1: {f1}")
-
-
