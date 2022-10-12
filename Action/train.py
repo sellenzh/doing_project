@@ -1,3 +1,4 @@
+import torch
 from torch import nn
 from torch.utils.data import TensorDataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -15,7 +16,7 @@ seed_all(seed)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-PIE_PATH = './PIE_dataset'
+PIE_PATH = './PIE'
 data_opts = {
     'fstride': 1,
     'sample_type': 'all',
@@ -67,31 +68,46 @@ action_train = tte_seq_train['activities']
 action_valid = tte_seq_valid['activities']
 action_test = tte_seq_test['activities']
 
-vel_train = torch.cat((tte_seq_train['obd_speed'], tte_seq_train['gps_speed']), dim=-1)
-vel_valid = torch.cat((tte_seq_valid['obd_speed'], tte_seq_valid['gps_speed']), dim=-1)
-vel_test = torch.cat((tte_seq_test['obd_speed'], tte_seq_test['gps_speed']), dim=-1)
+vel_train_obd = torch.Tensor(np.array(tte_seq_train['obd_speed']))
+vel_train_gps = torch.Tensor(np.array(tte_seq_train['gps_speed']))
+vel_valid_obd = torch.Tensor(np.array(tte_seq_valid['obd_speed']))
+vel_valid_gps = torch.Tensor(np.array(tte_seq_valid['gps_speed']))
+vel_test_obd = torch.Tensor(np.array(tte_seq_test['obd_speed']))
+vel_test_gps = torch.Tensor(np.array(tte_seq_test['gps_speed']))
+
+vel_train = torch.cat((vel_train_obd, vel_train_gps), dim=-1)
+vel_valid = torch.cat((vel_valid_obd, vel_valid_gps), dim=-1)
+vel_test = torch.cat((vel_test_obd, vel_test_gps), dim=-1)
 
 
 normalized_bbox_train = normalize_bbox(bbox_train)
 normalized_bbox_valid = normalize_bbox(bbox_valid)
 normalized_bbox_test = normalize_bbox(bbox_test)
 
+'''normalized_bbox_train = torch.cat((normalized_bbox_train, vel_train), dim=-1)
+normalized_bbox_valid = torch.cat((normalized_bbox_valid, vel_valid), dim=-1)
+normalized_bbox_test = torch.cat((normalized_bbox_test, vel_test), dim=-1)'''
+
 label_action_train = prepare_label(action_train)
 label_action_valid = prepare_label(action_valid)
 label_action_test = prepare_label(action_test)
 
-X_train, X_valid = torch.Tensor(normalized_bbox_train), torch.Tensor(normalized_bbox_valid)
-Y_train, Y_valid = torch.Tensor(label_action_train), torch.Tensor(label_action_valid)
-X_test = torch.Tensor(normalized_bbox_test)
-Y_test = torch.Tensor(label_action_test)
+X_train, X_valid = torch.Tensor(np.array(normalized_bbox_train)), torch.Tensor(np.array(normalized_bbox_valid))
+Y_train, Y_valid = torch.Tensor(np.array(label_action_train)), torch.Tensor(np.array(label_action_valid))
+X_test = torch.Tensor(np.array(normalized_bbox_test))
+Y_test = torch.Tensor(np.array(label_action_test))
 
-train_set = TensorDataset(X_train, vel_train, Y_train)
-valid_set = TensorDataset(X_valid, vel_valid, Y_valid)
-test_set = TensorDataset(X_test, vel_test, Y_test)
+X_train = torch.cat((X_train, vel_train), dim=-1)
+X_valid = torch.cat((X_valid, vel_valid), dim=-1)
+X_test = torch.cat((X_test, vel_test), dim=-1)
+
+train_set = TensorDataset(X_train, Y_train)
+valid_set = TensorDataset(X_valid, Y_valid)
+test_set = TensorDataset(X_test, Y_test)
 
 train_loader = DataLoader(train_set, batch_size=input_opts['batch_size'], shuffle=True)
 valid_loader = DataLoader(valid_set, batch_size=input_opts['batch_size'], shuffle=True)
-test_loader = DataLoader(test_set, batch_size=256)
+test_loader = DataLoader(test_set, batch_size=128)
 
 # Training Loop
 print("Start Training Loop \n")
