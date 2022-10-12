@@ -21,6 +21,8 @@ def balance_dataset(dataset, flip=True):
          'activities': dataset['activities'].copy(),
          'image': dataset['image'].copy(),
          'center': dataset['center'].copy(),
+         'obd_speed': dataset['obd_speed'].copy(),
+         'gps_speed': dataset['gps_speed'].copy(),
          'image_dimension': (1920, 1080)}
 
     gt_labels = [gt[0] for gt in d['activities']]
