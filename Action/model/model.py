@@ -143,7 +143,7 @@ class Encoder(nn.Module):
             vel = self.vel_layers[i](vel)
             bbox2vel = self.cross_bbox2vel[i](x, vel)
             vel2bbox = self.cross_vel2bbox[i](vel, x)
-            x, vel = vel2bbox, bbox2vel
+            vel, x = vel2bbox, bbox2vel
 
         return x, vel#[batch_size, seq_len, d_model]
 
@@ -156,6 +156,8 @@ class Model(nn.Module):
 
         self.resize = nn.Linear(d_model * 2, d_model)
 
+        self.att_t = Time_att(d_model)
+
         self.linear = nn.Linear(d_model, 4)
         self.act1 = nn.ReLU()
         self.dense = nn.Linear(4, 1)
@@ -167,51 +169,42 @@ class Model(nn.Module):
         vel = data[:, :, -2:]
         x, vel = self.encoder(x, vel)
         y = torch.cat((x, vel), dim=-1)# [32, 16, 256]
-        y = torch.mean(self.resize(y), dim=1)
+        #y = torch.mean(self.resize(y), dim=1)
+        y = self.att_t(self.resize(y))
 
         y = self.act1(self.linear(y))
         return self.activation(self.dense(y))
 
 
 
-class Test(nn.Module):
-    def __init__(self, mid_dim):
-        super(Test, self).__init__()
+class Time_att(nn.Module):
+    def __init__(self, dim):
+        super(Time_att, self).__init__()
 
-        self.linear1 = nn.Linear(mid_dim, mid_dim, bias=False)
-        self.linear2 = nn.Linear(mid_dim, 1, bias=False)
+        self.linear1 = nn.Linear(dim, dim, bias=False)
+        self.linear2 = nn.Linear(dim, 1, bias=False)
 
 
     def forward(self, x):
-        # x: [1,8,N,256]
+        x = x.contiguous()
+        y = self.linear2(torch.tanh(self.linear1(x)))# [B, N, 1]
+        
+        beta = F.softmax(y, dim=1) # [B,N,1]
 
-        x = x.contiguous()#[32, 16, 256]
-        shape = x.shape
-
-        f = x.view(1, shape[2], -1)# [1, 256, 512]
-        out1 = self.linear1(f)
-        act1 = torch.tanh(out1)
-        out2 = self.linear2(act1)
-        beta = F.softmax(out2, dim=1)
-
-        #beta = F.softmax(self.linear2(torch.tanh(self.linear1(f))), dim=1)  # [1,N,1]
-
-        c = beta * f
-        c = c.squeeze()
-        print(c.shape)
+        c = beta * x#[B, N, 1] * [B, N, C] = [B, N, C]
+        c = torch.sum(c, dim=1).squeeze()# [N, C]
         return c
     
 
 
 '''model = Model(num_layers=4, d_model=128, bbox_input=4, speed_input=2, num_heads=8, dff=256, maximum_position_encoding=16)
 
-bbox = torch.randn(size=(32, 16, 4))
-vel = torch.randn(size=(32, 16, 2))
+data = torch.randn(size=(32, 16, 6))
 
-y = model(bbox, vel)
+y = model(data)
 print(y.shape)'''
 
-'''model2 = Test(256)
+'''model2 = Time_att(256)
 tensor = torch.randn(size=(32, 16, 256))
 res = model2(tensor)
-res.shape'''
+print(res.shape)#expected res's size -> [32, 256]'''
