@@ -25,14 +25,14 @@ def create_look_ahead_mask(size):
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model, num_heads,d_input=None):
+    def __init__(self, d_model, num_heads, d_input=None):
         super(MultiHeadAttention, self).__init__()
         self.num_heads = num_heads
         self.d_model = d_model
 
-        assert d_model % d_input == 0
+        assert d_model % self.num_heads == 0
 
-        if d_model is None:
+        if d_input is None:
             d_input = d_model
         self.depth = d_model // self.num_heads
         self.q_w = nn.Linear(d_input, d_model, bias=False)
@@ -44,7 +44,7 @@ class MultiHeadAttention(nn.Module):
     def scaled_pot_product_attention(self, q, k, v, mask=None):
         matmul_qk = torch.matmul(q, k.transpose(-1, -2))
         scaled_attention_logit = matmul_qk / np.sqrt(self.depth)
-        if mask is None:
+        if mask is not None:
             scaled_attention_logit += (mask * -1e9)
         return torch.matmul(nn.Softmax(dim=-1)(scaled_attention_logit), v)
 
@@ -114,7 +114,7 @@ class Model(nn.Module):
 
         self.embedding_bbox = nn.Linear(bbox_input, d_model)
         self.embedding_vel = nn.Linear(speed_input, d_model)
-        #self.embedding_traj = nn.Linear(pe_input, d_model)
+        self.embedding_traj = nn.Linear(bbox_input, d_model)
 
 
         self.enc_layers = nn.ModuleList()
@@ -130,40 +130,41 @@ class Model(nn.Module):
             self.gate.append(Gate(d_model))
             #self.dec_layers.append(DecoderLayer(d_model, num_heads, dff, rate))
 
-        self.pos_encoding = positional_encoding(bbox_input, self.d_model)
-        self.pos_encoding_vel = positional_encoding(speed_input, self.d_model)
-        #self.pos_encoding_traj = positional_encoding(pe_input, self.d_model)
+        self.pos_encoding = positional_encoding(pe_input, self.d_model)
+        self.pos_encoding_vel = positional_encoding(pe_input, self.d_model)
+        self.pos_encoding_traj = positional_encoding(pe_target, self.d_model)
         self.dropout = nn.Dropout(rate)
 
         self.traj_weight = nn.Parameter(torch.zeros(
-            pe_input, pe_target, requires_grad=True, device='cuda'), requires_grad=True)
+            pe_input, pe_target - 1, requires_grad=True, device='cuda'), requires_grad=True)
         nn.init.normal_(self.traj_weight, 0, math.sqrt(
-            0.5 / (pe_target)))
+            0.5 / (pe_target - 1)))
 
         self.traj_bias = nn.Parameter(torch.zeros(
-            1, pe_target, 1, requires_grad=True, device='cuda'), requires_grad=True)
-        nn.init.constant(self.traj_bias, 1e-6)
+            1, pe_target - 1, 1, requires_grad=True, device='cuda'), requires_grad=True)
+        nn.init.constant_(self.traj_bias, 1e-6)
         self.relu = nn.ReLU()
-        self.bn = nn.BatchNorm1d(64)
+        self.bn = nn.BatchNorm1d(pe_target - 1)
 
         self.resize = nn.Linear(d_model * 2, d_model)
         self.att_t = Time_att(d_model)
 
+        self.final_layer = nn.Linear(d_model, bbox_input)
         self.linear = nn.Linear(d_model, 4)
         self.act1 = nn.ReLU()
         self.dense = nn.Linear(4, 1)
         self.activation = nn.Sigmoid()
 
     def forward(self, data, inp_dec, combined_mask=None, dec_padding_mask=None, enc_padding_mask=None):
-        x = data[:, :, :-2]
-        vel = data[:, :, -2:]
-        inp_dec = inp_dec[:, -self.pe_target:, :]
+        x = data[:, :, :-2]                         #[64, 16, 4]
+        vel = data[:, :, -2:]                       #[64, 16, 2]
+        inp_dec = inp_dec[:, -self.pe_target:, :]   #[64, 59, 4]
 
         seq_len = x.shape[-2]
         traj_len = inp_dec.shape[-2]
-        x = self.embedding_bbox(x)
-        vel = self.embedding_vel(vel)
-        inp_dec = self.embedding_traj(inp_dec)
+        x = self.embedding_bbox(x)                  #[64, 16, 256]
+        vel = self.embedding_vel(vel)               #[64, 16, 256]
+        inp_dec = self.embedding_traj(inp_dec)      #[64, 59, 4 -> 256]
 
         x += self.pos_encoding[:, :seq_len, :]
         vel += self.pos_encoding_vel[:, :seq_len, :]
@@ -177,15 +178,14 @@ class Model(nn.Module):
             x = self.gate[i](sa_x, bbox_cross)
 
             traj = torch.einsum('bdc,dt->btc', (x, self.traj_weight)).contiguous() + self.traj_bias + traj
+            #x:[64, 16, 256], traj_w: [16, 59], tarj_b: [1, 59, 1], traj: [64, 59, 256]
             traj = self.bn(self.relu(traj))
 
         y = self.resize(torch.cat((x, vel), dim=-1))
 
         y = self.att_t(y)
         y = self.act1(self.linear(y))
-        return traj, self.activation(self.dense(y))
-
-
+        return self.final_layer(traj), self.activation(self.dense(y))
 
 
 class Gate(nn.Module):
@@ -245,4 +245,7 @@ class ConvLayers(nn.Module):
 
 
 
-
+'''x_enc, x_dec_inp, combined_mask = torch.randn(size=(64, 16, 6)), torch.randn(size=(64, 59, 4)), torch.randn(size=(64, 1, 59, 59))
+model = Model(5, 256, 4, 2, 8, 512, 16, 60)
+x_enc, x_dec_inp, combined_mask = x_enc.to(device), x_dec_inp.to(device), combined_mask.to(device)
+traj, y = model(x_enc, x_dec_inp, combined_mask)'''
