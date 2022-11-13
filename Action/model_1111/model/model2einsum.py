@@ -137,11 +137,11 @@ class Model(nn.Module):
 
         self.traj_weight1 = nn.Parameter(torch.zeros(
             pe_input, (pe_target - 1) * 3, d_model * 2, requires_grad=True, device='cuda'), requires_grad=True)
-        nn.init.normal_(self.traj_weight, 0, math.sqrt(
+        nn.init.normal_(self.traj_weight1, 0, math.sqrt(
             0.5 / ((pe_target - 1) * 3)))
         self.traj_weight2 = nn.Parameter(torch.zeros(
             (pe_target - 1) * 3, pe_target - 1, d_model, requires_grad=True, device='cuda'), requires_grad=True)
-        nn.init.normal_(self.traj_weight, 0, math.sqrt(
+        nn.init.normal_(self.traj_weight2, 0, math.sqrt(
             0.5 / (pe_target - 1)))
 
         self.traj_bias = nn.Parameter(torch.zeros(
@@ -181,8 +181,8 @@ class Model(nn.Module):
             bbox_cross = self.cross[i](x, vel)
             x = self.gate[i](sa_x, bbox_cross)
 
-            traj = torch.einsum('bdc,duf->buf', (x, self.traj_weight1)).contiguous() + self.traj_bias + traj
-            traj = torch.einsum('buf,utc->btc', (traj, self.traj_weight2)).contiguous()
+            traj1 = torch.einsum('bdc,duf->buf', (x, self.traj_weight1)).contiguous() + self.traj_bias
+            traj += torch.einsum('buf,utc->btc', (traj1, self.traj_weight2)).contiguous()
             #x:[64, 16, 256], traj_w: [16, 59], tarj_b: [1, 59, 1], traj: [64, 59, 256]
             traj = self.bn(self.relu(traj))
 
