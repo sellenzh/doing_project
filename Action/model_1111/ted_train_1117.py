@@ -6,16 +6,21 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def loss_reg_function(pred, real, reg_critirion):
-    '''mask = torch.logical_not(real.eq(0.0))
-    loss_ = reg_critirion(real,pred)
+    mask = torch.logical_not(real.eq(0.0))
+    loss_ = reg_critirion(pred, real)
     
     mask = mask.float()
     
     loss_ = mask * loss_
     
-    return torch.sum(loss_)/torch.sum(mask)'''
+    return torch.sum(loss_)/torch.sum(mask)
     #loss = nn.MSELoss()
-    return reg_critirion(pred[:, :-1], real[:, :-1]) / np.power(pred[:, -1], 2) + np.log(pred[:, -1])
+    #sigma = torch.mean(pred[:, -1], dim=0)
+    #y = reg_critirion(pred[:, :-1], real[:, :-1]) 
+    #y /= (sigma * sigma)
+    #y += torch.log(sigma, requires_grad=True)
+    #result = y / (sigma * sigma) + torch.log(sigma)
+    #return reg_critirion(pred, real)
 
 
 
@@ -84,11 +89,12 @@ def train(model, train_loader, valid_loader, class_critirion, reg_critirion, cl_
             
             combined_mask  = create_masks(x_dec_inp).to(device)
             
-            out, act = model(x_enc, x_dec_inp, combined_mask)  # ①
+            out, act, sigma_pred = model(x_enc, x_dec_inp, combined_mask)  # ①
 
             cl_loss = class_critirion(act, y)  # ②
             re_loss = loss_reg_function(out, x_dec_real, reg_critirion)
-            f_loss = cl_lambda * cl_loss + reg_lambda * re_loss
+            #f_loss = cl_lambda * cl_loss + reg_lambda * re_loss
+            f_loss = cl_lambda * cl_loss + sigma_pred * re_loss
             
             model.zero_grad()  # ③
 
@@ -169,11 +175,12 @@ def evaluate(model, data_loader, class_critirion, reg_critirion, cl_lambda, reg_
             
             combined_mask  = create_masks(x_dec_inp).to(device)
             
-            out, act = model(x_enc, x_dec_inp, combined_mask)
+            out, act, sigma_pred = model(x_enc, x_dec_inp, combined_mask)
             
             val_cl_loss = class_critirion(act, y)
             val_re_loss = loss_reg_function(out, x_dec_real, reg_critirion)
-            val_f_loss = cl_lambda * val_cl_loss + reg_lambda * val_re_loss
+            #val_f_loss = cl_lambda * val_cl_loss + reg_lambda * val_re_loss
+            val_f_loss = cl_lambda * val_cl_loss + sigma_pred * val_re_loss
             
             val_full_losses += val_f_loss.item()
             val_class_losses += val_cl_loss.item()
@@ -197,7 +204,7 @@ def test(model, data_loader):
             
             combined_mask  = create_masks(x_dec_inp).to(device)
             
-            out, act = model(x_enc, x_dec_inp, combined_mask)
+            _, act, _ = model(x_enc, x_dec_inp, combined_mask)
             
             if(step == 0):
                 pred = act
