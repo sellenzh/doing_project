@@ -7,14 +7,14 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def loss_reg_function(pred, real, reg_critirion):
-    mask = torch.logical_not(real.eq(0.0))
+    '''mask = torch.logical_not(real.eq(0.0))
     loss_ = reg_critirion(pred, real)
     
     mask = mask.float()
     
     loss_ = mask * loss_
     
-    return torch.sum(loss_)/torch.sum(mask)
+    return torch.sum(loss_)/torch.sum(mask)'''
     #loss = nn.MSELoss()
     #sigma = torch.mean(pred[:, -1], dim=0)
     #y = reg_critirion(pred[:, :-1], real[:, :-1]) 
@@ -22,6 +22,7 @@ def loss_reg_function(pred, real, reg_critirion):
     #y += torch.log(sigma, requires_grad=True)
     #result = y / (sigma * sigma) + torch.log(sigma)
     #return reg_critirion(pred[:, :-1], real[:, :-1])    #only end point's loss.
+    return reg_critirion(pred, real)
 
 
 
@@ -90,10 +91,10 @@ def train(model, train_loader, valid_loader, class_critirion, reg_critirion, cl_
             
             combined_mask  = create_masks(x_dec_inp).to(device)
             
-            out, act, sigma_cls, sigma_reg = model(x_enc, x_dec_inp, combined_mask)  # ①
+            traj, act, sigma_cls, sigma_reg = model(x_enc, x_dec_inp, combined_mask)  # ①
 
             cl_loss = class_critirion(act, y)  # ②
-            re_loss = loss_reg_function(out, x_dec_real, reg_critirion)
+            re_loss = loss_reg_function(traj[:, -1], x_dec_real[:, -1], reg_critirion)
             #f_loss = cl_lambda * cl_loss + reg_lambda * re_loss
             f_loss = cl_loss / (sigma_cls * sigma_cls) + re_loss / (sigma_reg * sigma_reg) + torch.log(sigma_cls) + torch.log(sigma_reg)
             model.zero_grad()  # ③
@@ -108,7 +109,7 @@ def train(model, train_loader, valid_loader, class_critirion, reg_critirion, cl_
                         
             train_acc += binary_acc(y, torch.round(act))
         
-        #draft_endpoint(out, x_dec_real, epoch)
+        draft_endpoint(out, x_dec_real, epoch)
         draft_traj(out, x_dec_real, epoch)
         print("sigma_cls: " + str(sigma_cls.item()))
         print("sigma_reg: " + str(sigma_reg.item()) + "\n")
@@ -180,10 +181,10 @@ def evaluate(model, data_loader, class_critirion, reg_critirion, cl_lambda, reg_
             
             combined_mask  = create_masks(x_dec_inp).to(device)
             
-            out, act, sigma_cls, sigma_reg = model(x_enc, x_dec_inp, combined_mask)
+            traj, act, sigma_cls, sigma_reg, end_point = model(x_enc, x_dec_inp, combined_mask)
             
             val_cl_loss = class_critirion(act, y)
-            val_re_loss = loss_reg_function(out, x_dec_real, reg_critirion)
+            val_re_loss = loss_reg_function(end_point, x_dec_real[:, -1], reg_critirion)
             #val_f_loss = cl_lambda * val_cl_loss + reg_lambda * val_re_loss
             
             val_f_loss = val_cl_loss / (sigma_cls * sigma_cls) + val_re_loss / (sigma_reg * sigma_reg) + torch.log(sigma_cls) + torch.log(sigma_reg)
@@ -210,7 +211,7 @@ def test(model, data_loader):
             
             combined_mask  = create_masks(x_dec_inp).to(device)
             
-            _, act, _, _ = model(x_enc, x_dec_inp, combined_mask)
+            _, act, _, _, _ = model(x_enc, x_dec_inp, combined_mask)
             
             if(step == 0):
                 pred = act
@@ -231,8 +232,8 @@ def draft_endpoint(pred, real, epoch):
     plt.xlim(0.0, 1.0)
     plt.ylim(0.0, 1.0)
     for i in range(batch_idx):
-        X = list((pred[i, 0], real[i, 0]))
-        Y = list((pred[i, 1], real[i, 1]))
+        X = list((pred[i, -1, 0], real[i, -1, 0]))
+        Y = list((pred[i, -1, 1], real[i, -1, 1]))
         plt.plot(X, Y)
     #plt.legend(loc=0)
     plt.xlabel('x_steps')
@@ -246,18 +247,20 @@ def draft_traj(pred, real, epoch):
     batch_idx = pred.shape[0]
     time_idx = pred.shape[1]
     pred, real = pred.cpu().detach().numpy(), real.cpu().detach().numpy()
-    plt.clf()
     #plt.xlim(0.0, 1.0)
     #plt.ylim(0.0, 1.0)
     color_idx = 0
-    colors = ['r', 'g', 'b', 'y', 'c']
+
     for i in [0, batch_idx // 4, batch_idx // 2, -batch_idx // 4, -1]:
+        plt.clf()
+        plt.xlim(-0.5, 1.5)
+        plt.ylim(-0.5, 1.5)
         x_pred = list(pred[i, j, 0] for j in range(time_idx))
         y_pred = list(pred[i, j, 1] for j in range(time_idx))
         x_real = list(real[i, j, 0] for j in range(time_idx))
         y_real = list(real[i, j, 1] for j in range(time_idx))
-        plt.plot(x_pred, y_pred, label=str(i)+'_pr', color=colors[color_idx])
-        plt.plot(x_real, y_real, label=str(i)+'_re', color=colors[color_idx])
+        plt.plot(x_pred, y_pred, label=str(color_idx)+'_pr', color='r', linestyle='-')
+        plt.plot(x_real, y_real, label=str(color_idx)+'_re', color='b', linestyle='--')
         color_idx += 1
 
         plt.xlabel('x_steps')
