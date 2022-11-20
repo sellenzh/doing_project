@@ -181,10 +181,10 @@ def evaluate(model, data_loader, class_critirion, reg_critirion, cl_lambda, reg_
             
             combined_mask  = create_masks(x_dec_inp).to(device)
             
-            traj, act, sigma_cls, sigma_reg, end_point = model(x_enc, x_dec_inp, combined_mask)
+            traj, act, sigma_cls, sigma_reg = model(x_enc, x_dec_inp, combined_mask)
             
             val_cl_loss = class_critirion(act, y)
-            val_re_loss = loss_reg_function(end_point, x_dec_real[:, -1], reg_critirion)
+            val_re_loss = loss_reg_function(traj[:, -1], x_dec_real[:, -1], reg_critirion)
             #val_f_loss = cl_lambda * val_cl_loss + reg_lambda * val_re_loss
             
             val_f_loss = val_cl_loss / (sigma_cls * sigma_cls) + val_re_loss / (sigma_reg * sigma_reg) + torch.log(sigma_cls) + torch.log(sigma_reg)
