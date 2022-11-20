@@ -109,8 +109,8 @@ def train(model, train_loader, valid_loader, class_critirion, reg_critirion, cl_
                         
             train_acc += binary_acc(y, torch.round(act))
         
-        draft_endpoint(out, x_dec_real, epoch)
-        draft_traj(out, x_dec_real, epoch)
+        draft_endpoint(traj, x_dec_real, epoch)
+        draft_traj(traj, x_dec_real, epoch)
         print("sigma_cls: " + str(sigma_cls.item()))
         print("sigma_reg: " + str(sigma_reg.item()) + "\n")
             
