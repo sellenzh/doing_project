@@ -211,7 +211,7 @@ def test(model, data_loader):
             
             combined_mask  = create_masks(x_dec_inp).to(device)
             
-            _, act, _, _, _ = model(x_enc, x_dec_inp, combined_mask)
+            _, act, _, _ = model(x_enc, x_dec_inp, combined_mask)
             
             if(step == 0):
                 pred = act
