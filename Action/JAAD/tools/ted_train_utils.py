@@ -211,7 +211,7 @@ def test(model, data_loader):
             
             combined_mask  = create_masks(x_dec_inp).to(device)
             
-            _, act, _, _, _ = model(x_enc, x_dec_inp, combined_mask)
+            _, act, _, _ = model(x_enc, x_dec_inp, combined_mask)
             
             if(step == 0):
                 pred = act
@@ -229,8 +229,8 @@ def draft_endpoint(pred, real, epoch):
     batch_idx = pred.shape[0]
     pred, real = pred.cpu().detach().numpy(), real.cpu().detach().numpy()
     plt.clf() 
-    plt.xlim(0.0, 1.0)
-    plt.ylim(0.0, 1.0)
+    plt.xlim(-0.5, 1.5)
+    plt.ylim(-0.5, 1.5)
     for i in range(batch_idx):
         X = list((pred[i, -1, 0], real[i, -1, 0]))
         Y = list((pred[i, -1, 1], real[i, -1, 1]))
@@ -259,8 +259,8 @@ def draft_traj(pred, real, epoch):
         y_pred = list(pred[i, j, 1] for j in range(time_idx))
         x_real = list(real[i, j, 0] for j in range(time_idx))
         y_real = list(real[i, j, 1] for j in range(time_idx))
-        plt.plot(x_pred, y_pred, label=str(color_idx)+'_pr', color='r', linestyle='-')
-        plt.plot(x_real, y_real, label=str(color_idx)+'_re', color='b', linestyle='--')
+        plt.plot(x_pred, y_pred, label=str(color_idx)+'_pr', marker='+', color='r', linestyle='-')
+        plt.plot(x_real, y_real, label=str(color_idx)+'_re', marker='+', color='b', linestyle='--')
         color_idx += 1
 
         plt.xlabel('x_steps')
