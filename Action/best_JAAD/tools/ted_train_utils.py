@@ -7,14 +7,14 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def loss_reg_function(pred, real, reg_critirion):
-    '''mask = torch.logical_not(real.eq(0.0))
+    mask = torch.logical_not(real.eq(0.0))
     loss_ = reg_critirion(pred, real)
     
     mask = mask.float()
     
     loss_ = mask * loss_
     
-    return torch.sum(loss_)/torch.sum(mask)'''
+    return torch.sum(loss_)/torch.sum(mask)
     #loss = nn.MSELoss()
     #sigma = torch.mean(pred[:, -1], dim=0)
     #y = reg_critirion(pred[:, :-1], real[:, :-1]) 
@@ -22,7 +22,7 @@ def loss_reg_function(pred, real, reg_critirion):
     #y += torch.log(sigma, requires_grad=True)
     #result = y / (sigma * sigma) + torch.log(sigma)
     #return reg_critirion(pred[:, :-1], real[:, :-1])    #only end point's loss.
-    return reg_critirion(pred, real)
+    #return reg_critirion(pred, real)
 
 
 
@@ -94,7 +94,7 @@ def train(model, train_loader, valid_loader, class_critirion, reg_critirion, cl_
             traj, act, sigma_cls, sigma_reg = model(x_enc, x_dec_inp, combined_mask)  # ①
 
             cl_loss = class_critirion(act, y)  # ②
-            re_loss = loss_reg_function(traj[:, -1], x_dec_real[:, -1], reg_critirion)
+            re_loss = loss_reg_function(traj, x_dec_real, reg_critirion)
             #f_loss = cl_lambda * cl_loss + reg_lambda * re_loss
             f_loss = cl_loss / (sigma_cls * sigma_cls) + re_loss / (sigma_reg * sigma_reg) + torch.log(sigma_cls) + torch.log(sigma_reg)
             model.zero_grad()  # ③
@@ -184,7 +184,7 @@ def evaluate(model, data_loader, class_critirion, reg_critirion, cl_lambda, reg_
             traj, act, sigma_cls, sigma_reg = model(x_enc, x_dec_inp, combined_mask)
             
             val_cl_loss = class_critirion(act, y)
-            val_re_loss = loss_reg_function(traj[:, -1], x_dec_real[:, -1], reg_critirion)
+            val_re_loss = loss_reg_function(traj, x_dec_real, reg_critirion)
             #val_f_loss = cl_lambda * val_cl_loss + reg_lambda * val_re_loss
             
             val_f_loss = val_cl_loss / (sigma_cls * sigma_cls) + val_re_loss / (sigma_reg * sigma_reg) + torch.log(sigma_cls) + torch.log(sigma_reg)
