@@ -154,8 +154,8 @@ class ConvLayers(nn.Module):
             nn.BatchNorm1d(dims), nn.ReLU(),
             nn.Conv1d(in_channels=dims, out_channels=dims, kernel_size=5, stride=1, padding=2),
             nn.BatchNorm1d(dims), nn.ReLU(),
-            nn.Conv1d(in_channels=dims, out_channels=dims, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm1d(dims), nn.ReLU()
+            nn.Conv1d(in_channels=dims, out_channels=out_dims, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm1d(out_dims), nn.ReLU()
         )
 
     def forward(self, x):
@@ -176,8 +176,8 @@ class Model(nn.Module):
         self.embedding_bbox = nn.Linear(bbox_input, d_model)
         self.embedding_vel = nn.Linear(speed_input, d_model)
 
-        self.embedding_traj = nn.Linear(59, d_model)
-        self.traj_conv = ConvLayers(59, pe_input)
+        self.embedding_traj = nn.Linear(4, d_model)
+        self.traj_conv = ConvLayers(59, 16)
 
         self.enc_layers = nn.ModuleList()
         self.cross = nn.ModuleList()
@@ -246,7 +246,7 @@ class Model(nn.Module):
             traj += self.pos_encoding_traj[:, :traj_len, :]
             traj = self.traj_conv(traj)
             endp = self.traj_resize(torch.cat((traj, x), dim=-1))
-            
+
         endp = self.toendp(self.att_endp(x))
         y = self.resize(torch.cat((x, vel), dim=-1))
 
