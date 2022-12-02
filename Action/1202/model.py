@@ -165,6 +165,12 @@ class ConvLayers(nn.Module):
 class Model(nn.Module):
     def __init__(self, args, rate=0.25):
         super(Model, self).__init__()
+        # 设置一个可学习的参数sigma
+        self.sigma_cls = nn.Parameter(torch.zeros(1, 1, requires_grad=True).to(device), requires_grad=True)
+        nn.init.kaiming_normal_(self.sigma_cls, mode='fan_out')
+        self.sigma_endp = nn.Parameter(torch.zeros(1, 1, requires_grad=True).to(device), requires_grad=True)
+        nn.init.kaiming_normal_(self.sigma_endp, mode='fan_out')
+
         d_model = args['d_model']
         self.num_layers = args['num_layers']
         bbox_input = args['bbox_input']
@@ -176,14 +182,10 @@ class Model(nn.Module):
         self.embedding_bbox = nn.Linear(bbox_input, d_model)
         self.embedding_vel = nn.Linear(speed_input, d_model)
 
-        #self.embedding_traj = nn.Linear(4, d_model)
-        #self.traj_conv = ConvLayers(59, 16)
-
         self.enc_layers = nn.ModuleList()
         self.cross = nn.ModuleList()
         self.conv = nn.ModuleList()
-        self.gate = nn.ModuleList()
-        self.endp_fus = Gate(d_model)
+        self.gate = nn.ModuleList()        
 
         for _ in range(self.num_layers):
             self.enc_layers.append(EncoderLayer(d_model, num_heads, dff, rate))
@@ -193,43 +195,22 @@ class Model(nn.Module):
 
         self.pos_encoding = positional_encoding(pe_input, d_model)
         self.pos_encoding_vel = positional_encoding(pe_input, d_model)
-        #self.pos_encoding_traj = positional_encoding(59, d_model)
         self.dropout = nn.Dropout(rate)
-
-        '''self.toendp = MLP(d_model, 4)
-        self.att_endp = Time_att(d_model)'''
+        self.final_layer = MLP(d_model, 4)
         self.endp2fea = MLP(4, d_model)
-        self.weight1 = nn.Parameter(torch.zeros(16, d_model, 4, requires_grad=True).to(device), requires_grad=True)
-        self.bias = nn.Parameter(torch.zeros(1, 4, requires_grad=True).to(device), requires_grad=True)
-        self.weight2 = nn.Parameter(torch.zeros(4, d_model, requires_grad=True).to(device), requires_grad=True)
-        nn.init.kaiming_normal_(self.weight1, mode='fan_out')
-        nn.init.kaiming_normal_(self.bias, mode='fan_out')
-        nn.init.kaiming_normal_(self.weight2, mode='fan_out')
 
-        #self.resize = nn.Linear(d_model * 2, d_model)
-        self.inten_gate = Gate(dims=d_model)
+        self.inten_gate1 = Gate(dims=d_model)
+        self.inten_gate2 = Gate(d_model)
         self.endp_gate = Gate(dims=d_model)
 
-        self.att_t = Time_att(d_model)
-
-        self.final_layer = nn.Linear(d_model, bbox_input)
+        self.att_t1 = Time_att(d_model)
+        self.att_t2 = Time_att(d_model)
+        
         self.linear = nn.Linear(d_model, 4)
         self.relu = nn.ReLU()
         self.dense = nn.Linear(4, 1)
-        self.activation = nn.Sigmoid()
+        self.sig = nn.Sigmoid()
 
-        # 设置一个可学习的参数sigma
-        '''self.sigma_cls = nn.Parameter(torch.zeros(1, requires_grad=True, device=device), requires_grad=True)
-        nn.init.constant_(self.sigma_cls, 1e-6)
-        self.sigma_reg = nn.Parameter(torch.zeros(1, requires_grad=True, device=device), requires_grad=True)
-        nn.init.constant_(self.sigma_reg, 1e-6)'''
-
-        #self.sigma_cls = nn.Parameter(torch.zeros(1, 1, requires_grad=True, device=device), requires_grad=True)
-        self.sigma_cls = nn.Parameter(torch.zeros(1, 1, requires_grad=True).to(device), requires_grad=True)
-        nn.init.kaiming_normal_(self.sigma_cls, mode='fan_out')
-        #self.sigma_reg = nn.Parameter(torch.zeros(1, 1, requires_grad=True, device=device), requires_grad=True)
-        self.sigma_reg = nn.Parameter(torch.zeros(1, 1, requires_grad=True).to(device), requires_grad=True)
-        nn.init.kaiming_normal_(self.sigma_reg, mode='fan_out')
 
     def forward(self, data, traj=None):
         x = data[:, :, :-2]  # [64, 16, 4]
@@ -248,17 +229,8 @@ class Model(nn.Module):
             bbox_cross = self.cross[i](x, vel)
             x = self.gate[i](sa_x, bbox_cross)
 
-        '''if traj is not None:
-            traj_len = traj.shape[-2]
-            traj = self.embedding_traj(traj)
-            traj += self.pos_encoding_traj[:, :traj_len, :]
-            traj = self.traj_conv(traj)
-            endp = self.traj_resize(torch.cat((traj, x), dim=-1))'''
+        endp = self.final_layer(self.att_t1(self.inten_gate1(x, vel)))
 
-        #endp = self.toendp(self.att_endp(x))
-        endp = torch.einsum('btc,tcf->bf', (x, self.weight1)).contiguous() + self.bias
-        y = self.inten_gate(x, vel)
-
-        y = self.att_t(y)
-        y = self.relu(self.linear(self.endp_gate(y, self.endp2fea(endp))))
-        return endp, self.activation(self.dense(y)), self.sigma_cls, self.sigma_reg
+        y = self.relu(self.linear(self.endp_gate(self.att_t2(self.inten_gate2(x, vel)), self.endp2fea(endp))))
+        act = self.sig(self.dense(y))
+        return endp, act, self.sigma_cls, self.sigma_endp
