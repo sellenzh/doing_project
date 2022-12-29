@@ -53,7 +53,7 @@ class LitPedGraph(pl.LightningModule):
         logits = self(kps, img, bbox, vel)
         w = None if self.balance else self.tr_weight
 
-        y_onehot = torch.FloatTensor(label.shape[0], 2).to(label.device).zero_()
+        y_onehot = torch.FloatTensor(label.shape[0], 3).to(label.device).zero_()
         y_onehot.scatter_(1, label.long(), 1)
         loss = F.binary_cross_entropy_with_logits(logits, y_onehot, weight=w)
         preds = logits.softmax(1).argmax(1)
@@ -71,7 +71,7 @@ class LitPedGraph(pl.LightningModule):
         logits = self(kps, img, bbox, vel)
         w = None if self.balance else self.val_weight
         
-        y_onehot = torch.FloatTensor(label.shape[0], 2).to(label.device).zero_()
+        y_onehot = torch.FloatTensor(label.shape[0], 3).to(label.device).zero_()
         y_onehot.scatter_(1, label.long(), 1)
         loss = F.binary_cross_entropy_with_logits(logits, y_onehot, weight=w)
 
@@ -91,7 +91,7 @@ class LitPedGraph(pl.LightningModule):
         w = None if self.balance else self.te_weight
         # loss = F.cross_entropy(logits, y.view(-1).long(), weight=w)
         
-        y_onehot = torch.FloatTensor(label.shape[0], 2).to(label.device).zero_()
+        y_onehot = torch.FloatTensor(label.shape[0], 3).to(label.device).zero_()
         y_onehot.scatter_(1, label.long(), 1)
         loss = F.binary_cross_entropy_with_logits(logits, y_onehot, weight=w)
 
