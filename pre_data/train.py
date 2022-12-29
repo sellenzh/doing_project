@@ -10,12 +10,11 @@ import argparse
 from pathlib import Path
 
 from dataloader22 import DataSet
-from model.model import Model
+from models.model_jaad import Model
 
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.callbacks import LearningRateMonitor
-from torchmetrics.functional_classification.accuracy import accuracy
+from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
+from torchmetrics.functional.classification.accuracy import accuracy
 
 def seed_all(seed):
     torch.cuda.empty_cache()
@@ -33,7 +32,7 @@ class LitPedGraph(pl.LightningModule):
         self.total_steps = len_tr * args.epochs
         self.lr = args.lr
         self.epochs = args.epochs
-        self.model = Model()
+        self.model = Model(args)
         device = self.model.linear.weight.device
         tr_num_samples = [1025, 4778, 17582]
         self.tr_weight = torch.from_numpy(np.min(tr_num_samples) / tr_num_samples).float().to(device)
@@ -54,13 +53,32 @@ class LitPedGraph(pl.LightningModule):
         logits = self(kps, img, bbox, vel)
         w = None if self.balance else self.tr_weight
 
-        y_onehot = torch.FloatTensor(label.shape[0], 3).to(label.device).zero_()
+        y_onehot = torch.FloatTensor(label.shape[0], 2).to(label.device).zero_()
         y_onehot.scatter_(1, label.long(), 1)
         loss = F.binary_cross_entropy_with_logits(logits, y_onehot, weight=w)
         preds = logits.softmax(1).argmax(1)
         acc = accuracy(preds.view(-1).long(), label.view(-1).long())
         self.log('train_loss', loss, prog_bar=True)
         self.log('train_acc', acc * 100.0, prog_bar=True)
+        return loss
+
+    def validation_steps(self, batch, batch_nb):
+        kps = batch[0]
+        label = batch[1]
+        img = batch[2]
+        bbox = batch[3]
+        vel = batch[4]
+        logits = self(kps, img, bbox, vel)
+        w = None if self.balance else self.val_weight
+        
+        y_onehot = torch.FloatTensor(label.shape[0], 2).to(label.device).zero_()
+        y_onehot.scatter_(1, label.long(), 1)
+        loss = F.binary_cross_entropy_with_logits(logits, y_onehot, weight=w)
+
+        preds = logits.softmax(1).argmax(1) 
+        acc = accuracy(preds.view(-1).long(), label.view(-1).long())
+        self.log('val_loss', loss, prog_bar=True)
+        self.log('val_acc', acc * 100.0, prog_bar=True)
         return loss
 
     def test_steps(self, batch, batch_nb):
@@ -73,7 +91,7 @@ class LitPedGraph(pl.LightningModule):
         w = None if self.balance else self.te_weight
         # loss = F.cross_entropy(logits, y.view(-1).long(), weight=w)
         
-        y_onehot = torch.FloatTensor(label.shape[0], 3).to(label.device).zero_()
+        y_onehot = torch.FloatTensor(label.shape[0], 2).to(label.device).zero_()
         y_onehot.scatter_(1, label.long(), 1)
         loss = F.binary_cross_entropy_with_logits(logits, y_onehot, weight=w)
 
@@ -82,25 +100,6 @@ class LitPedGraph(pl.LightningModule):
         
         self.log('test_loss', loss, prog_bar=True)
         self.log('test_acc', acc * 100.0, prog_bar=True)
-        return loss
-
-    def val_steps(self, batch, batch_nb):
-        kps = batch[0]
-        label = batch[1]
-        img = batch[2]
-        bbox = batch[3]
-        vel = batch[4]
-        logits = self(kps, img, bbox, vel)
-        w = None if self.balance else self.val_weight
-        
-        y_onehot = torch.FloatTensor(label.shape[0], 3).to(label.device).zero_()
-        y_onehot.scatter_(1, label.long(), 1)
-        loss = F.binary_cross_entropy_with_logits(logits, y_onehot, weight=w)
-
-        preds = logits.softmax(1).argmax(1) 
-        acc = accuracy(preds.view(-1).long(), label.view(-1).long())
-        self.log('val_loss', loss, prog_bar=True)
-        self.log('val_acc', acc * 100.0, prog_bar=True)
         return loss
 
     def configure_optimizers(self):
@@ -168,7 +167,7 @@ if __name__ == '__main__':
     torch.cuda.empty_cache()
     parser = argparse.ArgumentParser('pedestrian model')
     parser.add_argument('--logdir', type=str, default='./log/JAAD', help='save path')
-    parser.add_argument('--device', type=str, default='cuda', help='choose device.')
+    parser.add_argument('--device', type=str, default=0, help='choose device.')
     parser.add_argument('--epochs', type=int, default=50, help='Number of epochs to train.')
     parser.add_argument('--lr', type=int, default=0.001, help='learning rate to train.')
     parser.add_argument('--data_path', type=str, default='./data/JAAD', help='data path')
@@ -178,5 +177,14 @@ if __name__ == '__main__':
     parser.add_argument('--balance', type=bool, default=True, help='Balnce or not the data set')
     parser.add_argument('--bh', type=str, default='all', help='all or bh, if use all samples or only samples with behaevior labers')
     parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--batch_size', type=int, default=64, help='size of batch.')
+
+    parser.add_argument('--d_model', type=int, default=256, help='the dimension after embedding.')
+    parser.add_argument('--num_layers', type=int, default=4, help='the number of layers.')
+    parser.add_argument('--dff', type=int, default=512, help='the number of the units.')
+    parser.add_argument('--num_heads', type=int, default=8, help='number of the heads of the multi-head model.')
+    parser.add_argument('--encoding_dims', type=int, default=32, help='dimension of the time.')
+    parser.add_argument('--bbox_input', type=int, default=4, help='dimension of bbox.')
+    parser.add_argument('--vel_input', type=int, default=1, help='dimension of velocity.')
     args = parser.parse_args()
     main(args)
