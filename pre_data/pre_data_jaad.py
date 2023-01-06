@@ -43,10 +43,9 @@ def load_crosspoint(vid, pid):
 def load_write_pkl(path, file):
     #print(path)
     #print(file)
-    sid = str(file.split('_')[0][-2:])
-    vid = str(file.split('_')[2])
+    vid = str(file.split('_')[1])
     #print(vid)
-    pid = str(file.split('_')[4]) + '_' + str(file.split('_')[5]) + '_' + str(file.split('_')[6])
+    pid = str(file.split('_')[3]) + '_' + str(file.split('_')[4]) + '_' + str(file.split('_')[5])
     #print(pid)
     fid = str(file.split('_')[-1].split('.')[0])
     #print(fid)
@@ -67,11 +66,11 @@ def load_write_pkl(path, file):
         pk.dump(data, f)
     #print(str(vid) + '_' + str(pid) + '_' + str(fid) + 'Finished!')
 
-jaad_annotations_path = os.getcwd() + '/PIE/annotations/'
+jaad_annotations_path = os.getcwd() + '/JAAD/annotations/'
 #jaad_annotations_path = os.getcwd() + '/test/xml/'
 #annot = os.walk(jaad_annotations_path)
-jaad_attributes_path = os.getcwd() + '/PIE/annotations_attributes/'
-kps_path = os.getcwd() + '/PIE_dataset/data/'
+jaad_attributes_path = os.getcwd() + '/JAAD/annotations_attributes/'
+kps_path = os.getcwd() + '/data/JAAD/data/'
 #kps_path = os.getcwd() + '/test/pkl/'
 kps = os.walk(kps_path)
 count = 0
