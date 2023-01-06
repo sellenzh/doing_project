@@ -16,7 +16,7 @@ def load_xml_coordinates(path, file, pid, fid, i):
         if p != pid:
             continue
         for fr in ped.split('<box frame="')[1:]: #每帧数据：...<box frame=*xxx*" keyframe=...
-            if int(fr.split('" keyframe')[0]) == int(fid) + i:
+            if int(fr.split('"')[0]) == int(fid) + i:
                 if fr.split('xbr="')[1].split('"')[0] is not None and fr.split('xtl="')[1].split('"')[0] is not None and fr.split('ybr="')[1].split('"')[0] is not None and fr.split('ytl="')[1].split('"')[0] is not None:
                     return fr.split('xbr="')[1].split('"')[0], fr.split('xtl="')[1].split('"')[0], fr.split('ybr="')[1].split('"')[0], fr.split('ytl="')[1].split('"')[0]
         return '0.0', '0.0', '0.0', '0.0'
@@ -27,14 +27,14 @@ def readbbox(sid, vid, pid, fid, i):
     #return xbr, xtl, ybr, ytl
 
 def load_crosspoint(sid, vid, pid):
-    file_name_ori = 'set' + sid + '/video_' + vid + '.xml'
+    file_name_ori = 'set' + sid + '/video_' + vid + '_annt.xml'
     file_name = 'set' + sid + '/video_' + vid + '_attributes.xml'
     file = jaad_attributes_path + file_name
     with open(file, 'rb') as f:
         data = str(f.read())
     for ped in data.split('crossing_point="')[1:]:
-        if pid == ped.split('id="')[1].split('" intersection=')[0]:
-            cross_point = ped.split('" decision_point=')[0]
+        if pid == ped.split('id="')[1].split('" intention_prob')[0]:
+            cross_point = ped.split('" exp_start_point')[0]
             if cross_point == '-1':
                 break
             return load_xml_coordinates(jaad_annotations_path, file_name_ori, pid, cross_point, 0)
