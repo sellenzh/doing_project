@@ -145,25 +145,4 @@ class DataSet(data.Dataset):
         else:                               # if is crosing or not
             bh = torch.from_numpy(ped_data['crossing'].reshape([1])).float()
         return keypoints, bh, img, bbox, vel, cross_point
-        
-def main():
-    data_path = './data/JAAD'
-    jaad_path = './JAAD'
-    transform = A.Compose([A.ToTensor(), 
-        A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]), 
-        ])
-    tr_data = DataSet(path=data_path, jaad_path=jaad_path, data_set='train', balance=True, bh='all', transforms=transform)
-    iter_ = tqdm(range(len(tr_data)))
-    labels = np.zeros([len(tr_data), 3])
-    fs = np.zeros([len(tr_data), 192, 64])
-
-    for i in iter_:
-        pose, y, img, bbox, vel, cross_point = tr_data.__getitem__(i)
-        fs[i] = img[0]
-        labels[i, y.long().item()] = 1
-            
-    print(f'No Crossing: {int(labels.sum(0)[0])}, Crossing: {int(labels.sum(0)[1])}, Irrenlevants : {int(labels.sum(0)[2])} ')
-    print('finish')
-
-if __name__ == '__main__':
-    main()
+ 
