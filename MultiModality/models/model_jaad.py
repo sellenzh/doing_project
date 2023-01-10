@@ -3,7 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 import numpy as np
 
-#device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 def get_angles(position, i, d_model):
     angle_rates = 1 / np.power(10000, (2 * (i // 2)) / np.float32(d_model))
@@ -230,7 +230,6 @@ class KpsResize(nn.Module):
 class Model(nn.Module):
     def __init__(self, args):
         super(Model, self).__init__()
-        device = args.device
         self.sigma1 = nn.Parameter(torch.ones(1, 1, requires_grad=True).to(device), requires_grad=True)
         nn.init.kaiming_normal_(self.sigma1)
         self.sigma2 = nn.Parameter(torch.ones(1, 1, requires_grad=True).to(device), requires_grad=True)
@@ -256,7 +255,7 @@ class Model(nn.Module):
         self.bbox_img_layers = nn.ModuleList()
         self.bbox_kps_layers = nn.ModuleList()
         self.gates = nn.ModuleList()
-        self.gate = nn.ModuleList()
+        #self.gate = nn.ModuleList()
 
         self.vel_posi_enc = postional_encoding3d(self.times_num, self.d_model, device)
         self.vel_embedding = nn.Linear(self.vel, self.d_model)
@@ -269,7 +268,6 @@ class Model(nn.Module):
         self.kps_resize = nn.ModuleList()
 
         self.img_embedding = nn.Conv2d(4, self.d_model, kernel_size=3, padding=1)
-        self.bn_embed = nn.BatchNorm2d(self.d_model)
         self.img_conv = nn.ModuleList()
         self.img_resize = nn.ModuleList()
 
@@ -281,7 +279,7 @@ class Model(nn.Module):
             self.bbox_kps_layers.append(Encoder(self.d_model, self.num_heads, self.dff))
 
             self.gates.append(Gate4(dims=self.d_model))
-            self.gate.append(Gate(dims=self.d_model))
+            #self.gate.append(Gate(dims=self.d_model))
 
             self.vel_layers.append(VelConv(self.d_model))
 
@@ -303,11 +301,11 @@ class Model(nn.Module):
 
         self.pool1d = nn.AdaptiveAvgPool1d(1)
         self.pool2d = nn.AdaptiveAvgPool2d(1)
-
-        self.linear = nn.Linear(self.d_model * 4, 16)
+        self.gate_last = Gate4(dims=self.d_model)
+        self.linear = nn.Linear(self.d_model, 4)
         self.relu = nn.ReLU()
-        self.last = nn.Linear(16, 3)
-        #self.sig = nn.Sigmoid()
+        self.last = nn.Linear(4, 1)
+        self.sig = nn.Sigmoid()
 
     def forward(self, kps, img, bbox, vel):
         '''
@@ -317,7 +315,7 @@ class Model(nn.Module):
         :vel        :[b, 2, 32]
         '''
         seq_len = bbox.shape[-1]
-        
+
         bbox = self.bbox_embedding(bbox.transpose(-1, -2))#[b, 32, 256]
         bbox += self.bbox_posi_enc[:, :seq_len, :]
 
@@ -331,15 +329,14 @@ class Model(nn.Module):
         img = self.img_embedding(img)#[b, 256, 192, 64]
 
         for i in range(self.num_layers):
-            bbox_self = self.bbox_self_layers[i](bbox)
+            bbox = self.bbox_self_layers[i](bbox)
             vel = self.vel_layers[i](vel.transpose(-1, -2)).transpose(-1, -2)#b, 32, 256
             bbox_vel = self.bbox_vel_layers[i](bbox, vel)
             img = self.img_conv[i](img)#b, 256, 192, 64
             bbox_img = self.bbox_img_layers[i](bbox, self.img_resize[i](img))
             kps = self.time[i](self.spatial[i](kps.permute(0, 2, 3, 1)).permute(0, 2, 1, 3)).permute(0, 3, 2, 1)
             bbox_kps = self.bbox_kps_layers[i](bbox, self.kps_resize[i](kps).transpose(-1, -2))
-            bbox_all = self.gates[i](bbox_self, bbox_vel, bbox_img, bbox_kps)
-            bbox = self.gate[i](bbox, bbox_all)
+            bbox = self.gates[i](bbox, bbox_img, bbox_vel, bbox_kps)
         
         pred_point = self.cross(self.time_att(bbox))
 
@@ -347,9 +344,10 @@ class Model(nn.Module):
         vel_pool = self.pool1d(vel.transpose(-1, -2)).squeeze()# b, 32, 256
         img_pool = self.pool2d(img).squeeze() #b, 256, 192, 64
         kps_pool = self.pool2d(kps).squeeze() #b, 256, 32, 19
-        y = torch.cat((feature, vel_pool, img_pool, kps_pool), dim=-1)
+        #y = torch.cat((feature, vel_pool, img_pool, kps_pool), dim=-1)
+        y = self.gate_last(feature, vel_pool, img_pool, kps_pool)
         y = self.relu(self.linear(y))
-        return self.last(y), pred_point, self.sigma1, self.sigma2
+        return self.sig(self.last(y)), pred_point, self.sigma1, self.sigma2
 
 '''import argparse
 parser = argparse.ArgumentParser('pedestrian model')
@@ -364,8 +362,8 @@ parser.add_argument('--jaad_path', type=str, default='./JAAD')
 parser.add_argument('--balance', type=bool, default=True, help='Balnce or not the data set')
 parser.add_argument('--bh', type=str, default='all', help='all or bh, if use all samples or only samples with behaevior labers')
 parser.add_argument('--seed', type=int, default=42)
-parser.add_argument('--batch_size', type=int, default=64, help='size of batch.')
-parser.add_argument('--d_model', type=int, default=128, help='the dimension after embedding.')
+parser.add_argument('--batch_size', type=int, default=64, help='size of batch.')'''
+'''parser.add_argument('--d_model', type=int, default=128, help='the dimension after embedding.')
 parser.add_argument('--num_layers', type=int, default=4, help='the number of layers.')
 parser.add_argument('--dff', type=int, default=256, help='the number of the units.')
 parser.add_argument('--num_heads', type=int, default=8, help='number of the heads of the multi-head model.')
